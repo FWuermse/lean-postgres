@@ -92,12 +92,7 @@ def sendPassword (socket : Socket) (password : String) : IO (Char × ByteArray) 
   sendMessage socket msg
 
 def openConnectection (host : String) (port : String) (user : String) (database : String) (password : String) : IO Socket := do
-  let dataSource ← SockAddr.mk ⟨
-    host,
-    port,
-    inet,
-    stream
-  ⟩
+  let dataSource ← SockAddr.mk host port inet stream
   let socket ← Socket.mk inet stream
   socket.connect dataSource
   let startUpRes ← sendStartupMessage socket user database

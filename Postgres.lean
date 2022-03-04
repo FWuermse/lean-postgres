@@ -1,2 +1,2 @@
-import Postgres.Connection
+import Postgres.Postgres
 import Postgres.Query

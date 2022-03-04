@@ -6,8 +6,8 @@ The Protocol documentation: [Frontend/Backend Protocol](https://www.postgresql.o
 
 Heavily relies on [Socket.lean](https://github.com/xubaiw/Socket.lean) for the TCP Socket.
 
-# TODOs
+## TODOs
 
-- Better abstraction layer
 - Include connection to [mathematical relations](https://github.com/hargoniX/lean-hm/blob/master/Hm/Relation.lean)
-- Types for query building
+- Extend query Syntax and TermElab
+- Support insert, create table and delete statements

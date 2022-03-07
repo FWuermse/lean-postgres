@@ -2,7 +2,7 @@ import Socket
 import Lean
 import Postgres.Postgres
 
-open Socket Connect Lean Lean.Elab.Term
+open Socket Connect Lean Meta Elab Elab.Term
 
 namespace Query
 
@@ -11,7 +11,7 @@ inductive Col where
   | col : String → Col
 
 instance : ToString Col where
-  toString col := match col with
+  toString
     | Col.col str => str
     | Col.as s1 s2 => s1 ++ " AS " ++ s2
 
@@ -24,18 +24,23 @@ instance : ToString Tbl where
     | Tbl.tbl str => str
     | Tbl.alias s1 s2 => s1 ++ " " ++ s2
 
-inductive FieldDesc where
-  | distinct : List Col → FieldDesc
-  | on : List Col → FieldDesc
+structure FieldDesc where
+  distinct : Bool
+  cols : Array Col
 
-def foldToString {α : Type u} [ToString α] : α → String → String
-  | y, "" => toString y
-  | y, x => x ++ ", " ++ toString y
+private def joinSep (sep : String) (ss : Array String) : String :=
+  let firstNonempty? := ss.findIdx? (! ·.isEmpty)
+  match firstNonempty? with
+  | none => ""
+  | some firstNonempty =>
+    ss.foldl (start := firstNonempty + 1) (init := ss[firstNonempty]) λ res s =>
+      if s.isEmpty then res else res ++ sep ++ s
 
 instance : ToString FieldDesc where
-  toString fieldDesc := match fieldDesc with
-    | FieldDesc.distinct cols => "DISTINCT " ++ List.foldr foldToString "" cols
-    | FieldDesc.on cols => List.foldr foldToString "" cols
+  toString fieldDesc :=
+    let distinct := if fieldDesc.distinct then "DISTINCT " else ""
+    let fields := fieldDesc.cols.map toString |> joinSep ", "
+    distinct ++ fields
 
 inductive Select where
   | all
@@ -55,30 +60,31 @@ instance : ToString BinOp where
     | BinOp.and => "AND"
     | BinOp.or => "OR"
 
-structure Expres where
-  bool : Bool
+inductive SqlExpr
+  | bool (b : Bool)
+  | binOp (l : SqlExpr) (o : BinOp) (r : SqlExpr)
 
-instance : ToString Expres where
-  toString expres := toString expres.bool
+namespace SqlExpr
 
-inductive Pred where
-  | expr : Expres → Pred
-  | binOp : Expres → BinOp → Pred
+protected def toString : SqlExpr → String
+  | bool true => "TRUE"
+  | bool false => "FALSE"
+  | binOp l o r => s!"({SqlExpr.toString l}) {o} ({SqlExpr.toString r})"
 
-instance : ToString Pred where
-  toString pred := match pred with
-    | Pred.expr e => toString e
-    | Pred.binOp e b => toString e ++ toString b
+instance : ToString SqlExpr :=
+  ⟨SqlExpr.toString⟩
+
+end SqlExpr
 
 structure Whr where
-  pred : Pred
+  pred : SqlExpr
 
 instance : ToString Whr where
-  toString whr := toString whr.pred
+  toString whr := s!"WHERE {whr.pred}"
 
 structure Query where
   select : Select
-  frm : List Tbl
+  frm : Array Tbl
   /--
   TODO:
   whr : Option Whr := none
@@ -87,23 +93,21 @@ structure Query where
   limit : Option String := none -/
 
 instance : ToString Query where
-  toString q := s!"SELECT {q.select} FROM {List.foldr foldToString "" q.frm};"
+  toString q :=
+    let frm := q.frm.map toString |> joinSep ", "
+    s!"SELECT {q.select} FROM {frm};"
 
-declare_syntax_cat col
-syntax str : col
-syntax str "AS" str : col
+syntax col := str ("AS" str)?
 
 declare_syntax_cat tbl
 syntax str : tbl
 syntax str str : tbl
 
-declare_syntax_cat field_desc
-syntax "DISTINCT"? (col),+ : field_desc
-syntax (col),+ : field_desc
+syntax fieldDesc := "DISTINCT "? col,+
 
 declare_syntax_cat select
 syntax "*" : select
-syntax field_desc : select
+syntax fieldDesc : select
 
 declare_syntax_cat bin_op
 syntax "AND" : bin_op
@@ -112,73 +116,75 @@ syntax "OR" : bin_op
 declare_syntax_cat expr
 syntax "TRUE" : expr
 syntax "FALSE" : expr
+syntax expr bin_op expr : expr -- not sure if this needs to be factored for left-recursion
 
-declare_syntax_cat frm
-syntax (tbl),+ : frm
-
-declare_syntax_cat pred
-syntax expr : pred
-syntax expr bin_op : pred
-
-declare_syntax_cat whr
-syntax pred : whr
-
-declare_syntax_cat query
-syntax "SELECT" select "FROM" frm ("WHERE" whr)? : query
+syntax query := "SELECT " select "FROM " tbl,+ ("WHERE " expr)?
 
 syntax (name := sql) query ";" : term
 
-def synToString (stx : Syntax) : String :=
-  match stx.getSubstring? with
-  -- TODO: Address error case
-    | none => "ERROR Processing Query!!! Alarm"
-    | some x => (toString x).replace "\"" ""
+private def elabStrLit (stx : Syntax) : TermElabM Expr :=
+  match stx.isStrLit? with
+  | some val => pure $ mkStrLit val
+  | none => throwIllFormedSyntax
 
-def toCol (stx : Syntax) : Expr :=
-  match stx.asNode.getKind with
-    | `Query.col_AS_ => mkApp2 (mkConst `Query.Col.as) (mkStrLit $ synToString stx[0][0]) (mkStrLit $ synToString stx[2][0])
-    | `Query.col_ => mkApp (mkConst `Query.Col.col) (mkStrLit $ synToString stx[0][0])
-    | _ => mkStrLit ""
+def elabCol : Syntax → TermElabM Expr
+  | `(col| $x:strLit AS $y:strLit) => do
+    mkAppM ``Col.as #[← elabStrLit x, ← elabStrLit y]
+  | `(col| $x:strLit) => do
+    mkAppM ``Col.col #[← elabStrLit x]
+  | _ => throwIllFormedSyntax
 
-def toTbl (stx : Syntax) : Expr :=
-  match stx.asNode.getKind with
-    | `Query.tbl__ => mkApp2 (mkConst `Query.Tbl.alias) (mkStrLit $ synToString stx[0][0]) (mkStrLit $ synToString stx[1][0])
-    | `Query.tbl_ => mkApp (mkConst `Query.Tbl.tbl) (mkStrLit $ synToString stx[0][0])
-    | _ => mkStrLit ""
+def elabTbl : Syntax → TermElabM Expr
+  | `(tbl| $x:strLit $y:strLit) => do
+    mkAppM ``Tbl.alias #[← elabStrLit x, ← elabStrLit y]
+  | `(tbl| $x:strLit) => do
+    mkAppM ``Tbl.tbl #[← elabStrLit x]
+  | _ => throwIllFormedSyntax
 
-def filterArg (s : Syntax) : Bool :=
-  match synToString s with
-    | ", " => false
-    | "" => false
-    | _ => true
+def elabFieldDesc : Syntax → TermElabM Expr
+  | `(fieldDesc| DISTINCT $cs:col,*) => go true cs
+  | `(fieldDesc| $cs:col,*) => go false cs
+  | _ => throwIllFormedSyntax
+  where
+    go (distinct : Bool) (cs : Array Syntax) : TermElabM Expr := do
+      let cols ← mkArrayLit (mkConst ``Col) (← cs.mapM elabCol).toList
+      let distinct :=
+        if distinct then Lean.mkConst ``true else Lean.mkConst ``false
+      mkAppM ``FieldDesc.mk $ #[distinct, cols]
 
-def mkExprList (stx : Syntax) (transform : Syntax → Expr) (type : Expr) : MetaM Expr := do
-  let s := stx.asNode.getArgs.filter filterArg
-  -- map columns to Expr
-  let cols := Array.toList $ s.map transform
-  -- transform List Expr into Expr
-  Meta.mkListLit type cols
+def elabSelect : Syntax → TermElabM Expr
+  | `(select| *) => mkConst ``Select.all
+  | `(select| $d:fieldDesc) => do mkAppM ``Select.cols #[← elabFieldDesc d]
+  | _ => throwIllFormedSyntax
 
-def mkSelect (stx : Syntax) : MetaM Expr := do
-  do match stx.asNode.getKind with
-    | `Query.«select*» => pure $ mkConst `Query.Select.all
-    | `Query.select_ => match stx[0].asNode.getKind with
-      | `Query.field_descDISTINCT_ => pure $ mkApp (Lean.mkConst `Query.Select.cols) $ mkApp (Lean.mkConst `Query.FieldDesc.distinct) (← mkExprList stx[0][1] toCol (mkConst `Query.Col))
-      | `Query.field_desc_ => pure $ mkApp (Lean.mkConst `Query.Select.cols) $ mkApp (mkConst `Query.FieldDesc.on) (← mkExprList stx[0][0] toCol (mkConst `Query.Col))
-      | _ => throwError "Failed to parse Select paramseters"
-    | _ => pure $ mkStrLit "Failed to parse Select"
+def elabBinOp : Syntax → TermElabM Expr
+  | `(bin_op| AND) => return mkConst ``BinOp.and
+  | `(bin_op| OR) => return mkConst ``BinOp.or
+  | _ => throwIllFormedSyntax
 
-def mkFrm (stx : Syntax) : MetaM Expr :=
-  mkExprList stx[0] toTbl (mkConst `Query.Tbl)
+partial def elabSqlExpr : Syntax → TermElabM Expr
+  | `(expr| TRUE ) => return mkApp (mkConst ``SqlExpr.bool) (mkConst ``true)
+  | `(expr| FALSE) => return mkApp (mkConst ``SqlExpr.bool) (mkConst ``false)
+  | `(expr| $e₁:expr $o:bin_op $e₂:expr) => do
+    mkAppM ``SqlExpr.binOp #[← elabSqlExpr e₁, ← elabBinOp o, ← elabSqlExpr e₂]
+  | _ => throwIllFormedSyntax
 
-@[termElab sql] def queryImpl : TermElab := λ stx expectedType? => do
-  do match stx.asNode.getArgs with
-    | #[q, _] => match q.asNode.getArgs with
-      | #[_, s, _, f, w?] => match w?.getHead? with
-        | none => pure $ mkApp2 (mkConst `Query.Query.mk) (← mkSelect s) (← mkFrm f)
-        | some w => mkSelect s
-      | _ => throwError "Failed to parse Query"
-    | _ => throwError "Failed to parse"
+@[termElab sql]
+def elabSql : TermElab := λ stx _ =>
+  match stx with
+  | `(sql| SELECT $s:select FROM $ts:tbl,* $[WHERE $p:expr]?;) => do
+    let select ← elabSelect s
+    let frm ← mkArrayLit (mkConst ``Tbl) $
+      (← (ts : Array Syntax).mapM elabTbl).toList
+    mkAppM ``Query.mk #[select, frm]
+  | _ => throwIllFormedSyntax
+
+-- 'Unit test' for elaboration
+set_option trace.debug true in
+#eval show TermElabM Unit from do
+  let stx ← `(SELECT "c₁", "c₂" FROM "t₁, t₂" WHERE TRUE OR FALSE;)
+  let query ← evalExpr Query ``Query (← elabSql stx none)
+  trace[debug] s!"{query}"
 
 def sendQuery (socket : Socket) (query : Query) : IO ByteArray := do
   let req ← socket.send $ toByteArray $ RegularMessage.mk 'Q' (toString query)

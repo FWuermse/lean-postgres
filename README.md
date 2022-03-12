@@ -22,12 +22,26 @@ package your-package where
 
 ## Usage
 
-### Requirement
+### Requirements
 
 Requires a running Postgres instance e.G. via Docker:
 
 ```sh
 docker run -d --name postgres -e POSTGRES_PASSWORD=password -v ~/my-volume:/var/lib/postgresql/data -p 5432:5432 postgres
+```
+
+and currently only supports free text password auth, enabled by changing the following line in your `~/my-volume/pg_hba.conf`
+
+from
+
+```sh
+host all all all scram-sha-256
+```
+
+to
+
+```sh
+host all all all password
 ```
 
 ### Code
@@ -37,13 +51,14 @@ Currently only simple queries are supported:
 ```lean
 import Postgres
 
-open Connect Query
+open Connect
+open Query
 
 def main : IO Unit := do
-  let conn ← openConnection "localhost" "5432" "postgres" "postgres" "password"
-  let query := SELECT "customer_age" AS "age", "customer_name" FROM "company_data";
+  let conn ← openConnection "localhost" "5432" "postgres" "postgres" "pw"
+  let query := SELECT "pilot", "flugzeug" FROM "pf";
   let resp ← sendQuery conn query
-  IO.println s!"ByteArray response: {resp}"
+  IO.println resp
   conn.close
 ```
 

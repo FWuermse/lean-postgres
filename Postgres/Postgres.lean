@@ -1,26 +1,13 @@
 import Socket
+import Postgres.Util
 
 open Socket
 open AddressFamily
 open SockType
-open List (map foldr)
 open ByteArray (size mkEmpty)
 open String (singleton)
 
-def foldByteArray (xs : List ByteArray) : ByteArray :=
-  foldr ByteArray.append (mkEmpty 0) xs
-
-def uInt16ToByteArray (i: UInt16) : ByteArray :=
-  List.toByteArray $ map (UInt16.toUInt8 ∘ i.shiftRight ∘ (. * 8)) [1, 0]
-
-def uInt32ToByteArray (i: UInt32) : ByteArray :=
-  List.toByteArray $ map (UInt32.toUInt8 ∘ i.shiftRight ∘ (. * 8)) [3, 2, 1, 0]
-
-def toUInt32LE (bs : ByteArray) : UInt32 :=
-  (bs.get! 0).toUInt32 <<< 0x18 |||
-  (bs.get! 1).toUInt32 <<< 0x10 |||
-  (bs.get! 2).toUInt32 <<< 0x8  |||
-  (bs.get! 3).toUInt32
+open Util
 
 namespace Connect
 

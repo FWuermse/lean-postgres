@@ -1,9 +1,9 @@
-import Postgres
+import Postgres.Util
 
 namespace Parse
 
 inductive ParseByteArray (α : Type) where
-  | success (ba : ByteArray) (rest : α)
+  | success (ba : ByteArray) (res : α)
   | error (ba : ByteArray) (err : String)
 
 end Parse
@@ -12,7 +12,7 @@ def Parse (α : Type) : Type := ByteArray → Parse.ParseByteArray α
 
 namespace Parse
 
-open ParseByteArray Util QueryResponse
+open ParseByteArray Util
 
 instance (α : Type) : Inhabited (Parse α) :=
   ⟨λ ba => error ba ""⟩
@@ -22,7 +22,7 @@ def pure (a : α) : Parse α := λ ba =>
 
 def bind {α β : Type} (f : Parse α) (g : α → Parse β) : Parse β := λ ba =>
   match f ba with
-  | success rest a => g a rest
+  | success res a => g a res
   | error pos msg => error pos msg
 
 instance : Monad Parse :=
@@ -33,9 +33,9 @@ def fail (msg : String) : Parse α := λ ba =>
 
 def orElse (p : Parse α) (q : Unit → Parse α) : Parse α := λ ba =>
   match p ba with
-  | success rest a => success rest a
-  | error rest err =>
-    if ba.size = rest.size then q () ba else error rest err
+  | success res a => success res a
+  | error res err =>
+    if ba.size = res.size then q () ba else error res err
 
 @[inline]
 def attempt (p : Parse α) : Parse α := λ ba =>
@@ -55,35 +55,31 @@ def eof : Parse Unit := λ ba =>
     success ba ()
 
 def string (s : String := "") : Parse String := λ ba =>
-  let (str, rest) := takeString ba ""
+  let (str, res) := takeString ba ""
   if str = "" then
     error ba "No String could be parsed"
   else
-    success rest str
+    success res str
 
 def twoBytes : Parse UInt16 := λ ba =>
   if ba.size > 1 then
-    let (i, rest) := take2 ba
-    success rest i
+    let (i, res) := take2 ba
+    success res i
   else
     error ba "No UInt16 could be parsed"
 
 def fourBytes : Parse UInt32 := λ ba =>
   if ba.size > 1 then
-    let (i, rest) := take4 ba
-    success rest i
+    let (i, res) := take4 ba
+    success res i
   else
     error ba "No UInt32 could be parsed"
 
-def column : Parse Column := do
-  pure ⟨
-    ← string,
-    ← fourBytes,
-    ← twoBytes,
-    ← fourBytes,
-    ← twoBytes,
-    ← fourBytes,
-    ← twoBytes
-  ⟩
+def nBytes (n : Nat) : Parse String := λ ba =>
+  let (str, res) := takeNAsStr n ba
+  if str = "" then
+    error ba s!"No String with {n} bytes could be parsed"
+  else
+    success res str
 
 end Parse

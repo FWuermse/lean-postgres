@@ -6,9 +6,11 @@
 
 import Socket
 import Postgres.Util
+import Postgres.Parse
 
 open Socket
 open Util
+open Parse
 open List (map foldr range)
 open ByteArray
 open Prod (fst snd)
@@ -59,36 +61,36 @@ instance : ToString Section where
 
 namespace QueryResponse
 
-def parseColumn (bs : ByteArray) : Column × ByteArray :=
-  let (colName, rest) := takeString bs
-  let (tableOID, rest) := take4 rest
-  let (colIndex, rest) := take2 rest
-  let (typeOID, rest) := take4 rest
-  let (colLength, rest) := take2 rest
-  let (typeModifyer, rest) := take4 rest
-  let (format, rest) := take2 rest
-  (⟨
-    colName,
-    tableOID,
-    colIndex,
-    typeOID,
-    colLength,
-    typeModifyer,
-    format
-  ⟩, rest)
+def column : Parse Column := do
+  Parse.pure ⟨
+    ← string,
+    ← fourBytes,
+    ← twoBytes,
+    ← fourBytes,
+    ← twoBytes,
+    ← fourBytes,
+    ← twoBytes
+  ⟩
 
 /--
-  Parses `n` elements `α` recursively with the given parse function `parseα`
+  Parses `n` elements `α` recursively with the given parser
 -/
-partial def parse {α : Type u} : UInt16 → Option (List α) → (ByteArray → α × ByteArray) → ByteArray → List α × ByteArray
-  | 0, some xs, _, ba => (xs, ba)
-  | n, none, parseα, ba => parse (n-1) (some [fst $ parseα ba]) parseα (snd $ parseα ba)
-  | n, some xs, parseα, ba => parse (n-1) (some $ xs.append [fst $ parseα ba]) parseα (snd $ parseα ba)
+partial def parse {α : Type} : UInt16 → Option (List α) → Parse α → Parse (List α)
+  | 0, some xs, _ => do Parse.pure xs
+  | n, none, p => do parse (n-1) (some [← p]) p
+  | n, some xs, p => do parse (n-1) (some $ xs.append [← p]) p
 
 def parseField (ba : ByteArray) : Field × ByteArray :=
   let (length, rest) := take4 ba
   let (content, rest) := takeNAsStr length.toNat rest
   (⟨length, content⟩, rest)
+
+def field : Parse Field := do
+  let length ← fourBytes
+  Parse.pure ⟨
+    length,
+    ← nBytes length.toNat
+  ⟩
 
 partial def parseRows (socket : Socket) (l : List DataRow) : IO $ List DataRow := do
   let method := Char.ofNat (← socket.recv 1)[0].toNat
@@ -98,7 +100,10 @@ partial def parseRows (socket : Socket) (l : List DataRow) : IO $ List DataRow :
   let fieldCount := toUInt16LE $ ← socket.recv 2
   -- Excluding 6 Bytes for length and field count
   let content ← socket.recv (length - 6).toUSize
-  let (fields, _) := parse fieldCount none parseField content
+  let pfields := parse fieldCount none field
+  let fields := match pfields content with
+    | Parse.ParseByteArray.success ba xs => xs
+    | Parse.ParseByteArray.error ba s => []
   parseRows socket (l.append [⟨method, length, fieldCount, fields⟩])
 
 def parseQueryResponse (socket : Socket) : IO Section := do
@@ -107,7 +112,10 @@ def parseQueryResponse (socket : Socket) : IO Section := do
   let fieldCount := toUInt16LE $ ← socket.recv 2
   -- Excluding 6 Bytes for length and field count
   let content ← socket.recv (length - 6).toUSize
-  let (columns, _) := parse fieldCount none parseColumn content
+  let pcolumns := parse fieldCount none column
+  let columns := match pcolumns content with
+    | Parse.ParseByteArray.success ba xs => xs
+    | Parse.ParseByteArray.error ba s => []
   pure ⟨
     ⟨
       method,

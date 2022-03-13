@@ -56,7 +56,7 @@ open Query
 
 def main : IO Unit := do
   let conn ← openConnection "localhost" "5432" "postgres" "postgres" "pw"
-  let query := SELECT "pilot", "flugzeug" FROM "pf";
+  let query := SELECT pilot, flugzeug FROM pf;
   let resp ← sendQuery conn query
   IO.println resp
   conn.close

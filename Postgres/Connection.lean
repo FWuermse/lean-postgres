@@ -10,8 +10,9 @@ import Postgres.Util
 open Socket
 open AddressFamily
 open SockType
-open ByteArray (size mkEmpty)
+open ByteArray (size mkEmpty mk)
 open String (singleton)
+open UInt32 (toNat)
 
 open Util
 
@@ -28,12 +29,12 @@ structure RegularMessage where
 
 instance : ToByteArray RegularMessage where
   toByteArray msg :=
-    let pstfx := ByteArray.mk $ mkArray 1 0
+    let «postfix» := mk #[0]
     let method := msg.method.toString.toUTF8
     let data := msg.data.toUTF8
-    -- 5 Bytes for method + length
+    -- 5 Bytes for length + postfix
     let length := uInt32ToByteArray ∘ Nat.toUInt32 $ 5 + size data
-    foldByteArray [method, length, data, pstfx]
+    foldByteArray [method, length, data, «postfix»]
 
 structure StartUpMessage where
   majorVersion: UInt16
@@ -45,7 +46,7 @@ structure StartUpMessage where
 
 instance : ToByteArray StartUpMessage where
   toByteArray msg :=
-    let pstfix := ByteArray.mk $ mkArray 2 0
+    let «postfix» := mk #[0, 0]
     let majorVersion := uInt16ToByteArray msg.majorVersion
     let minorVersion := uInt16ToByteArray msg.minorVersion
     let data := String.toUTF8 $ (singleton '\x00').intercalate [
@@ -55,8 +56,8 @@ instance : ToByteArray StartUpMessage where
       "client_encoding", s!"{msg.clientEncoding}"
     ]
     -- 10 Bytes for postfix + major/minor Version + length
-    let length := uInt32ToByteArray ∘ Nat.toUInt32 $ 10 + size data
-    foldByteArray [length, majorVersion, minorVersion, data, pstfix]
+    let length := uInt32ToByteArray ∘ Nat.toUInt32 $ (10 + size data)
+    foldByteArray [length, majorVersion, minorVersion, data, «postfix»]
 
 inductive PSQLMessage where
   | startUpMessage : StartUpMessage → PSQLMessage
@@ -67,12 +68,17 @@ instance : ToByteArray PSQLMessage where
     | PSQLMessage.startUpMessage m => toByteArray m
     | PSQLMessage.regularMessage m => toByteArray m
 
+inductive MetaInformation where
+  | line : Char → UInt32 → String → MetaInformation → MetaInformation
+  | nil
+
 def sendMessage (socket : Socket) (msg : PSQLMessage) : IO (Char × ByteArray) := do
-  let req ← socket.send $ toByteArray $ msg
+  let req ← socket.send ∘ toByteArray $ msg
   let res ← socket.recv 5
   let flag := Char.ofNat $ ((res.extract 0 1).get! 0).toNat
   let size := toUInt32LE $ res.extract 1 5
-  let data ← socket.recv (size.toUSize - 5)
+  -- 4 Bytes for size
+  let data ← socket.recv (size.toUSize - 4)
   pure (flag, data)
 
 def sendStartupMessage (socket : Socket) (user : String) (database : String) : IO (Char × ByteArray) := do
@@ -84,6 +90,16 @@ def sendPassword (socket : Socket) (password : String) : IO (Char × ByteArray) 
   let msg := PSQLMessage.regularMessage ⟨'p', password⟩
   sendMessage socket msg
 
+partial def readMetaInformation (socket : Socket) : IO MetaInformation := do
+  let method := Char.ofNat (← socket.recv 1)[0].toNat
+  let length := toUInt32LE $ (← socket.recv 4)
+  let data := String.fromUTF8Unchecked (← socket.recv (length.toUSize-4))
+  IO.println s!"Reading: {method} {length} {data}"
+  if data == "I" then
+    pure $ MetaInformation.line method length data MetaInformation.nil
+  else
+    pure $ MetaInformation.line method length data (← readMetaInformation socket)
+
 def openConnection (host : String) (port : String) (user : String) (database : String) (password : String) : IO Socket := do
   let dataSource ← SockAddr.mk host port inet stream
   let socket ← Socket.mk inet stream
@@ -92,12 +108,10 @@ def openConnection (host : String) (port : String) (user : String) (database : S
   if startUpRes.fst != 'R' then
     throw $ IO.Error.userError "Database connection failed"
  
-  -- TODO: Clear buffer properly
-  let _ ← socket.recv 1000
   let sendPWRes ← sendPassword socket password
   if sendPWRes.fst != 'R' || toUInt32LE sendPWRes.snd != 0 then
     throw $ IO.Error.userError "Password authentication failed"
-  let _ ← socket.recv 1000
+  let metaInformation ← readMetaInformation socket
   pure socket
 
 end Connect

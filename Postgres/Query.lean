@@ -6,7 +6,7 @@
 
 import Socket
 import Lean
-import Postgres.Postgres
+import Postgres.Connection
 import Postgres.Response
 import SqlUtils.SQLSyntax
 

@@ -5,12 +5,13 @@
 -/
 
 open List (map foldr toByteArray)
-open ByteArray (mkEmpty)
+open ByteArray (mkEmpty append extract)
+open String (fromUTF8Unchecked)
 
 namespace Util
 
 def foldByteArray (xs : List ByteArray) : ByteArray :=
-  foldr ByteArray.append (mkEmpty 0) xs
+  foldr append (mkEmpty 0) xs
 
 def uInt16ToByteArray (i: UInt16) : ByteArray :=
   toByteArray $ map (UInt16.toUInt8 ∘ i.shiftRight ∘ (. * 8)) [1, 0]
@@ -29,20 +30,20 @@ def toUInt16LE (bs : ByteArray) : UInt16 :=
   (bs.get! 1).toUInt16 <<< 0x10
 
 def take2 (ba : ByteArray) : UInt16 × ByteArray :=
-  (toUInt16LE (ba.extract 0 2), ba.extract 2 ba.size)
+  (toUInt16LE (extract ba 0 2), extract ba 2 ba.size)
 
 def take4 (ba : ByteArray) : UInt32 × ByteArray :=
-  (toUInt32LE (ba.extract 0 4), ba.extract 4 ba.size)
+  (toUInt32LE (extract ba 0 4), extract ba 4 ba.size)
 
 partial def takeString (ba : ByteArray) (string : String := "") : String × ByteArray :=
   match ba.size with
-    | 0 => (string, ByteArray.mkEmpty 0)
-    | 1 => (string ++ String.fromUTF8Unchecked ba, ByteArray.mkEmpty 0)
+    | 0 => (string, mkEmpty 0)
+    | 1 => (string ++ fromUTF8Unchecked ba, mkEmpty 0)
     | _ =>  match ba[0] with
-      | 0 => (string, ba.extract 1 ba.size)
-      | x => takeString (ba.extract 1 ba.size) (string ++ (String.fromUTF8Unchecked $ ba.extract 0 1))
+      | 0 => (string, extract ba 1 ba.size)
+      | x => takeString (extract ba 1 ba.size) (string ++ (fromUTF8Unchecked $ extract ba 0 1))
 
 def takeNAsStr (n : Nat) (ba : ByteArray) : String × ByteArray :=
-  (String.fromUTF8Unchecked (ba.extract 0 n), ba.extract n ba.size)
+  (fromUTF8Unchecked (extract ba 0 n), extract ba n ba.size)
 
 end Util

@@ -54,12 +54,11 @@ def eof : Parse Unit := λ ba =>
   else
     success ba ()
 
-def string (s : String := "") : Parse String := λ ba =>
-  let (str, res) := takeString ba ""
-  if str = "" then
-    error ba "No String could be parsed"
+def oneByte : Parse Char := λ ba =>
+  if ba.size > 0 then
+    success (ba.extract 1 ba.size) (Char.ofNat ba[0].toNat)
   else
-    success res str
+    error ba expectedEndOfInput
 
 def twoBytes : Parse UInt16 := λ ba =>
   if ba.size > 1 then
@@ -79,6 +78,13 @@ def nBytes (n : Nat) : Parse String := λ ba =>
   let (str, res) := takeNAsStr n ba
   if str = "" then
     error ba s!"No String with {n} bytes could be parsed"
+  else
+    success res str
+
+def string (s : String := "") : Parse String := λ ba =>
+  let (str, res) := takeString ba ""
+  if str = "" then
+    error ba "No String could be parsed"
   else
     success res str
 

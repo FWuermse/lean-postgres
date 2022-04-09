@@ -2,8 +2,6 @@ import Lean
 open Lean Elab Meta
 open List (length)
 
-def typeOf {α : Sort u} (a : α) := α
-
 inductive Varchar (i : UInt8) where
   | mk : (s: String) → (h : s.length <= i.toNat := by simp) → Varchar i
 
@@ -72,12 +70,13 @@ open Insert Insert.Univ
 ]
 
 -- Doesn't typecheck
-#check insert [
-  ('a', 4, Varchar(2) "Hi"),
-  ("String", 3, 'd')
-]
-
-#check insert [
-  (Varchar(255) "Hello World", 2, 'c'),
-  (Varchar(254) "Hello World", 100, 'A')
-]
+-- #check insert [
+--   ('a', 4, Varchar(2) "Hi"),
+--   ("String", 3, 'd')
+-- ]
+-- 
+-- #check insert [
+--   (Varchar(255) "Hello World", 2, 'c'),
+--   (Varchar(254) "Hello World", 100, 'A')
+-- ]
+-- 

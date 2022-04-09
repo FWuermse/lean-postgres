@@ -1,26 +1,36 @@
 import Lean
-open Lean Elab Meta
-open List (length)
 
 inductive Varchar (i : UInt8) where
   | mk : (s: String) → (h : s.length <= i.toNat := by simp) → Varchar i
 
-namespace Insert
+instance : ToString (Varchar i) where
+  toString vc := match vc with
+    | Varchar.mk s _ => s
+
+inductive Date where
+  | mk : (y : Nat) → (m : Fin 13) → (d : Fin 32) → (h : m >= 1 ∧ d >= 1 := by simp) →  Date
+
+instance : ToString Date where
+  toString date := match date with
+    | Date.mk y m d _ => s!"'{y}-{m}-{d}'"
+
 inductive Univ
   | nat
   | char
   | varchar (n : UInt8)
+  | date
 
 def Univ.interp : Univ → Type
   | nat => Nat
   | char => Char
   | varchar n => Varchar n
+  | date => Date
 
-inductive HList {α : Type v} (β : α → Type u) : List α → Type (max u v)
-  | nil  : HList β []
-  | cons : β i → HList β is → HList β (i::is)
+inductive Tuple : List Univ → Type
+  | nil : Tuple []
+  | cons (x : u.interp) (xs : Tuple us) : Tuple (u :: us)
 
-abbrev Tuple := HList Univ.interp
+namespace Insert
 
 def Tuple.of {us: List Univ} (x : Tuple us) : List Univ := us
 
@@ -28,6 +38,8 @@ declare_syntax_cat sqlType
 syntax char : sqlType
 syntax num : sqlType
 syntax "Varchar(" num ") " str : sqlType
+syntax num "-" num "-" num : sqlType
+
 
 syntax "(" sqlType,* ")" : term
 macro_rules
@@ -37,12 +49,13 @@ macro_rules
       | 0,   _     => pure result
       | i+1, true  => expandListLit i false result
       | i+1, false => match elems.elemsAndSeps[i] with
-        | `(sqlType|$c:charLit) => expandListLit i true (← ``((HList.cons $c $result : Tuple (Univ.char::Tuple.of $result))))
-        | `(sqlType|$n:numLit) => expandListLit i true (← ``((HList.cons ($n : Nat) $result : Tuple (Univ.nat::Tuple.of $result))))
-        | `(sqlType|Varchar($n:numLit) $v:strLit) => expandListLit i true (← ``((HList.cons (Varchar.mk $v) $result : Tuple (Univ.varchar ($n)::Tuple.of $result)))) -- TODO nicer syntax for varchar len
-        | _ => expandListLit i true  (← ``(HList.cons $(elems.elemsAndSeps[i]) $result))
+        | `(sqlType|$c:charLit) => expandListLit i true (← ``((Tuple.cons $c $result : Tuple (Univ.char::Tuple.of $result))))
+        | `(sqlType|$n:numLit) => expandListLit i true (← ``((Tuple.cons ($n : Nat) $result : Tuple (Univ.nat::Tuple.of $result))))
+        | `(sqlType|Varchar($n:numLit) $v:strLit) => expandListLit i true (← ``((Tuple.cons (Varchar.mk $v) $result : Tuple (Univ.varchar ($n)::Tuple.of $result)))) -- TODO nicer syntax for varchar len
+        | `(sqlType|$y:numLit-$m:numLit-$d:numLit) => expandListLit i true (← ``((Tuple.cons (Date.mk $y $m $d) $result : Tuple (Univ.date::Tuple.of $result))))
+        | _ => expandListLit i true  (← ``(Tuple.cons $(elems.elemsAndSeps[i]) $result))
     if elems.elemsAndSeps.size < 64 then
-      expandListLit elems.elemsAndSeps.size false (← ``(HList.nil))
+      expandListLit elems.elemsAndSeps.size false (← ``(Tuple.nil))
     else
       `(%[ $elems,* | Tuple.nil ])
 
@@ -54,7 +67,7 @@ def insert {α : List Univ} (x : List (Tuple α)) : Response :=
 
 end Insert
 
-open Insert Insert.Univ
+open Insert
 
 -- Typechecks:
 #check insert [
@@ -64,9 +77,9 @@ open Insert Insert.Univ
 ]
 
 #check insert [
-  (1, 100, 'c', 'd'),
-  (20, 99, '@', 'x'),
-  (100, 1, '$', '€')
+  (1, 100, 'c', 'd', 2011-11-11),
+  (20, 99, '@', 'x', 2008-12-14),
+  (100, 1, '$', '€', 2022-03-12)
 ]
 
 -- Doesn't typecheck

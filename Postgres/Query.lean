@@ -10,7 +10,7 @@ import Postgres.Connection
 import Postgres.Response
 import SqlUtils.SQLSyntax
 
-open Socket Connect Lean Meta Elab Elab.Term QueryResponse
+open Socket Connect Lean Meta Elab Elab.Term Response.QueryResponse
 
 namespace Query
 

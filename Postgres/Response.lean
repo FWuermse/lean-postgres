@@ -59,6 +59,21 @@ structure Section where
 instance : ToString Section where
   toString s := s!"{s.rowDesc}\n" ++ "\n".intercalate (map toString s.dataRow)
 
+namespace Response
+
+inductive MetaInformation where
+  | line : Char → UInt32 → String → MetaInformation → MetaInformation
+  | nil
+
+partial def readMetaInformation (socket : Socket) : IO MetaInformation := do
+  let method := Char.ofNat (← socket.recv 1)[0].toNat
+  let length := toUInt32LE $ (← socket.recv 4)
+  let data := String.fromUTF8Unchecked (← socket.recv (length.toUSize - 4))
+  if data == "I" then
+    pure $ MetaInformation.line method length data MetaInformation.nil
+  else
+    pure $ MetaInformation.line method length data (← readMetaInformation socket)
+
 namespace QueryResponse
 
 def column : Parse Column := do
@@ -127,3 +142,5 @@ def parseQueryResponse (socket : Socket) : IO Section := do
   ⟩
 
 end QueryResponse
+
+end Response

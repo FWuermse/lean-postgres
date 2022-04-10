@@ -6,6 +6,7 @@
 
 import Socket
 import Postgres.Util
+import Postgres.Response
 
 open Socket
 open AddressFamily
@@ -15,6 +16,7 @@ open String (singleton)
 open UInt32 (toNat)
 
 open Util
+open Response
 
 namespace Connect
 
@@ -68,10 +70,6 @@ instance : ToByteArray PSQLMessage where
     | PSQLMessage.startUpMessage m => toByteArray m
     | PSQLMessage.regularMessage m => toByteArray m
 
-inductive MetaInformation where
-  | line : Char → UInt32 → String → MetaInformation → MetaInformation
-  | nil
-
 def sendMessage (socket : Socket) (msg : PSQLMessage) : IO (Char × ByteArray) := do
   let req ← socket.send ∘ toByteArray $ msg
   let res ← socket.recv 5
@@ -89,16 +87,6 @@ def sendStartupMessage (socket : Socket) (user : String) (database : String) : I
 def sendPassword (socket : Socket) (password : String) : IO (Char × ByteArray) := do
   let msg := PSQLMessage.regularMessage ⟨'p', password⟩
   sendMessage socket msg
-
-partial def readMetaInformation (socket : Socket) : IO MetaInformation := do
-  let method := Char.ofNat (← socket.recv 1)[0].toNat
-  let length := toUInt32LE $ (← socket.recv 4)
-  let data := String.fromUTF8Unchecked (← socket.recv (length.toUSize-4))
-  IO.println s!"Reading: {method} {length} {data}"
-  if data == "I" then
-    pure $ MetaInformation.line method length data MetaInformation.nil
-  else
-    pure $ MetaInformation.line method length data (← readMetaInformation socket)
 
 def openConnection (host : String) (port : String) (user : String) (database : String) (password : String) : IO Socket := do
   let dataSource ← SockAddr.mk host port inet stream

@@ -1,14 +1,9 @@
-import Socket
 import Postgres.Util
-import Postgres.Response
-import Lean
 
 open List (map)
 open Util
-open Socket
-open Response
 
-open Lean Elab Meta 
+open Lean Elab Meta
 
 class ToByteArray (α : Type u) where
   toByteArray : α → ByteArray
@@ -101,42 +96,20 @@ syntax:1000 "(" sqlType,* ")" : term
 
 macro_rules
   | `(( $elems,* )) => do
-    let rec expandListLit (i : Nat) (skip : Bool) (result : Lean.Syntax) : Lean.MacroM Lean.Syntax := do
+    let rec expandListLit (i : Nat) (skip : Bool) (result : Lean.TSyntax `term) : Lean.MacroM $ Lean.Syntax := do
       match i, skip with
       | 0,   _     => pure result
       | i+1, true  => expandListLit i false result
-      | i+1, false => match elems.elemsAndSeps[i] with
-        | `(sqlType|$c:charLit) => expandListLit i true (← ``((Tuple.cons $c $result : Tuple (Univ.char::Tuple.of $result))))
-        | `(sqlType|$n:numLit) => expandListLit i true (← ``((Tuple.cons ($n : Nat) $result : Tuple (Univ.nat::Tuple.of $result))))
-        | `(sqlType|Varchar($n:numLit) $v:strLit) => expandListLit i true (← ``((Tuple.cons (Varchar.mk $v) $result : Tuple (Univ.varchar ($n)::Tuple.of $result)))) -- TODO nicer syntax for varchar len
-        | `(sqlType|$y:numLit-$m:numLit-$d:numLit) => expandListLit i true (← ``((Tuple.cons (Date.mk $y $m $d) $result : Tuple (Univ.date::Tuple.of $result))))
+      | i+1, false => match elems.elemsAndSeps[i]! with
+        | `(sqlType|$c:char) => expandListLit i true (← ``((Tuple.cons $c $result : Tuple (Univ.char::Tuple.of $result))))
+        | `(sqlType|$n:num) => expandListLit i true (← ``((Tuple.cons ($n : Nat) $result : Tuple (Univ.nat::Tuple.of $result))))
+        | `(sqlType|Varchar($n:num) $v:str) => expandListLit i true (← ``((Tuple.cons (Varchar.mk $v) $result : Tuple (Univ.varchar ($n)::Tuple.of $result)))) -- TODO nicer syntax for varchar len
+        | `(sqlType|$y:num-$m:num-$d:num) => expandListLit i true (← ``((Tuple.cons (Date.mk $y $m $d) $result : Tuple (Univ.date::Tuple.of $result))))
         | _ => expandListLit i true  (← ``(Tuple.cons $(elems.elemsAndSeps[i]) $result)) -- TODO throw error here
     if elems.elemsAndSeps.size < 64 then
       expandListLit elems.elemsAndSeps.size false (← ``(Tuple.nil))
     else
       `(%[ $elems,* | Tuple.nil ])
-
-def parseInsertResponse (socket : Socket) : IO String := do
-  let method := Char.ofNat (← socket.recv 1)[0].toNat
-  if method = 'C' then
-    let length := toUInt32LE $ ← socket.recv 4
-    let responseMsg := takeNAsStr length.toNat (← socket.recv (length - 4).toUSize)
-    let method := Char.ofNat (← socket.recv 1)[0].toNat
-    let length := toUInt32LE $ ← socket.recv 4
-    let status := takeNAsStr length.toNat (← socket.recv (length -4).toUSize)
-    pure $ responseMsg.fst.dropRight 1
-  else
-    -- TODO parse error
-    IO.println "Error with insert response"
-    pure ""
-
-
-def insert {α : List Univ} (socket : Socket) (insert : @InsertQuery α) : IO String := do
-  let rows := ", ".intercalate $ map toString insert.values
-  let query := s!"INSERT INTO {insert.table} VALUES {rows};"
-  let insertType := InsertType.mk 'Q' (query.length.toUInt32 + 6) query 0
-  let req ← socket.send ∘ toByteArray $ insertType
-  parseInsertResponse socket
 
 syntax "INSERT INTO " ident " VALUES " : term
 

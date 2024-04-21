@@ -1,12 +1,16 @@
 import Lake
-open System Lake DSL
+open Lake DSL
 
-package postgres where
-  dependencies := #[{
-    name := `socket
-    src := Source.git "https://github.com/xubaiw/lean4-socket.git" "main"
-  },
-  {
-    name := `«sql-utils»
-    src := Source.git "https://github.com/FWuermse/lean4-sql-utils" "main"
-  }]
+require alloy from git "https://github.com/tydeu/lean4-alloy/" @ "master"
+require std from git "https://github.com/leanprover/std4.git"@"main"
+
+package Postgres where
+  -- add package configuration options here
+
+module_data alloy.c.o : BuildJob FilePath
+@[default_target]
+lean_lib Postgres where
+  precompileModules := true
+  nativeFacets := #[Module.oFacet, `alloy.c.o]
+  moreLeancArgs := #["-fPIC", "-I/opt/homebrew/opt/libpq/include", "-L/opt/homebrew/opt/libpq/lib", "-lpq"]
+  -- add library configuration options here

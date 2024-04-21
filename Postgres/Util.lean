@@ -39,9 +39,9 @@ partial def takeString (ba : ByteArray) (string : String := "") : String × Byte
   match ba.size with
     | 0 => (string, mkEmpty 0)
     | 1 => (string ++ fromUTF8Unchecked ba, mkEmpty 0)
-    | _ =>  match ba[0] with
-      | 0 => (string, extract ba 1 ba.size)
-      | x => takeString (extract ba 1 ba.size) (string ++ (fromUTF8Unchecked $ extract ba 0 1))
+    | _ => match ba[0]! with
+        | 0 => (string, extract ba 1 ba.size)
+        | _ => takeString (extract ba 1 ba.size) (string ++ (fromUTF8Unchecked $ extract ba 0 1))
 
 def takeNAsStr (n : Nat) (ba : ByteArray) : String × ByteArray :=
   (fromUTF8Unchecked (extract ba 0 n), extract ba n ba.size)

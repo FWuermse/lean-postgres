@@ -4,12 +4,6 @@
   Authors: Florian Würmseer
 -/
 
-import Socket
-import Postgres.Util
-import Postgres.Parse
-
-open Socket
-open Util
 open Parse
 open List (map foldr range)
 open ByteArray

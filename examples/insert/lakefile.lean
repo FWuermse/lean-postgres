@@ -1,8 +1,10 @@
 import Lake
 open System Lake DSL
 
+require Postgres from "../.."
+
 package insert where
-  dependencies := #[{
-    name := `postgres
-    src := Source.path "../.."
-  }]
+
+@[default_target]
+lean_exe insert where
+  root := `Main

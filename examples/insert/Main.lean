@@ -4,28 +4,19 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres
+import Postgres.Insert
 
 open Insert
-open Connect
-open Query
 
 def main : IO Unit := do
-  let conn ← openConnection "localhost" "5432" "postgres" "postgres" "pw"
   let insertQuery :=
-    INSERT INTO employee 
+    INSERT INTO employee
     VALUES [
       -- Type checking for row alignment and types
       (Varchar(15) "Florian", Varchar(15) "Würmseer", 123, 'R', 2014-01-09),
       (Varchar(15) "Erin", Varchar(15) "Jaeger", 999, 'A', 850-03-30)
     ]
-  IO.println $ ← insert conn insertQuery
-  let query := 
-    SELECT surname, nr, employment_date
-    FROM employee 
-    WHERE employee.employment_date <= "1800-12-31"
-  IO.println $ ← sendQuery conn query
-  conn.close
+  IO.print insertQuery.values
 
 -- Typechecks:
 #check [

@@ -5,13 +5,15 @@ open Util
 
 open Lean Elab Meta
 
+
+
 class ToByteArray (α : Type u) where
   toByteArray : α → ByteArray
 
 export ToByteArray (toByteArray)
 
 inductive Varchar (i : UInt8) where
-  | mk : (s: String) → (h : s.length <= i.toNat := by simp) → Varchar i
+  | mk : (s: String) → (h : s.length <= i.toNat := by decide) → Varchar i
 
 instance : ToString (Varchar i) where
   toString vc := match vc with
@@ -105,11 +107,11 @@ macro_rules
         | `(sqlType|$n:num) => expandListLit i true (← ``((Tuple.cons ($n : Nat) $result : Tuple (Univ.nat::Tuple.of $result))))
         | `(sqlType|Varchar($n:num) $v:str) => expandListLit i true (← ``((Tuple.cons (Varchar.mk $v) $result : Tuple (Univ.varchar ($n)::Tuple.of $result)))) -- TODO nicer syntax for varchar len
         | `(sqlType|$y:num-$m:num-$d:num) => expandListLit i true (← ``((Tuple.cons (Date.mk $y $m $d) $result : Tuple (Univ.date::Tuple.of $result))))
-        | _ => expandListLit i true  (← ``(Tuple.cons $(elems.elemsAndSeps[i]) $result)) -- TODO throw error here
+        | _ => expandListLit i true  (← ``(Tuple.cons `(( $elems,* )) $result)) -- TODO throw error here
     if elems.elemsAndSeps.size < 64 then
       expandListLit elems.elemsAndSeps.size false (← ``(Tuple.nil))
     else
-      `(%[ $elems,* | Tuple.nil ])
+      `(%[ `(( $elems,* )) | Tuple.nil ])
 
 syntax "INSERT INTO " ident " VALUES " : term
 

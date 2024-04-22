@@ -10,4 +10,6 @@ open Insert
 open LibPQ
 
 def main : IO Unit := do
-  let _ ← connect "localhost" "5432" "postgres" "postgres" "pw"
+  let conn := login "localhost" "5432" "postgres" "postgres" "password"
+  let _ ← exec conn "CREATE TABLE IF NOT EXISTS mytable (id SERIAL PRIMARY KEY, name VARCHAR(50), age INT)"
+  let _ ← exec conn "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"

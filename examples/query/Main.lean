@@ -6,15 +6,9 @@
 
 import Postgres
 
-open Connect
-open Query
-
 def main : IO Unit := do
-  let conn ← openConnection "localhost" "5432" "postgres" "postgres" "pw"
-  let query := 
-    SELECT surname, nr, employment_date 
-    FROM employee 
+  let query :=
+    SELECT surname, nr, employment_date
+    FROM employee
     WHERE employee.employment_date <= "1800-12-30"
-  let resp ← sendQuery conn query
-  IO.println resp
-  conn.close
+  IO.println query

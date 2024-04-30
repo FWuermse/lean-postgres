@@ -4,7 +4,7 @@
   Authors: Arthur Paulino
 -/
 
-import Postgres.SqlUtils.Utils
+import Postgres.Syntax.Utils
 
 inductive DataEntry
   | EInt (i : Int)

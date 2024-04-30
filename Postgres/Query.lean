@@ -4,18 +4,23 @@
   Authors: Florian Würmseer, Jannis Limperg
 -/
 
-import Socket
 import Lean
-import Postgres.Connection
-import Postgres.Response
-import SqlUtils.SQLSyntax
+import Postgres.LibPQ
+import Postgres.Syntax.QuerySyntax
 
-open Socket Connect Lean Meta Elab Elab.Term Response.QueryResponse
+open LibPQ Connection Lean Meta Elab Elab.Term
 
 namespace Query
 
-def sendQuery (socket : Socket) (query : SQLQuery) : IO Section := do
-  let req ← socket.send $ toByteArray $ RegularMessage.mk 'Q' (toString query)
-  parseQueryResponse socket
-
+def sendQuery (connection : Connection) (query : SQLQuery) : IO <| Option <| List <| List String := do
+  let res ← exec connection query.toString
+  if resStatus res != .tuplesOk then
+    let error ← resErr res
+    IO.println <| error
+    pure Option.none
+  else
+    let rows := List.map Nat.toUSize <| List.range (← nTuples res).toNat
+    let columns := List.map Nat.toUSize <| List.range (← nFields res).toNat
+    let table ← rows.mapM (λ x: USize => columns.mapM (λ y: USize => (getValue res x y)))
+    pure table
 end Query

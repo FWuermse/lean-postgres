@@ -4,7 +4,7 @@
   Authors: Arthur Paulino, Florian Würmseer
 -/
 
-import Postgres.SqlUtils.DataEntries
+import Postgres.Syntax.DataEntries
 
 inductive SQLSelectField
   | col   : String → SQLSelectField

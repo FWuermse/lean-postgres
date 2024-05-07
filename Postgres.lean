@@ -5,4 +5,4 @@ import Postgres.Parse
 import Postgres.Query
 import Postgres.Syntax
 import Postgres.LibPQ
-import Postgres.Table
+import Postgres.Schema

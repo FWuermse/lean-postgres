@@ -4,9 +4,9 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Insert
+import Postgres.Syntax.InsertSyntax
 
-open Insert
+open InsertSyntax
 
 def main : IO Unit := do
   let insertQuery :=

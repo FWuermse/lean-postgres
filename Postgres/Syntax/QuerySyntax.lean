@@ -9,6 +9,8 @@ import Postgres.Syntax.QueryDSL
 
 open Lean Elab Meta
 
+namespace QuerySyntax
+
 declare_syntax_cat      parsId
 syntax ident          : parsId
 syntax "(" parsId ")" : parsId

@@ -1,10 +1,12 @@
 import Postgres.Query
 import Postgres.LibPQ
-import Postgres.Insert
+import Postgres.Syntax.SchemaSyntax
+import Postgres.Syntax.SchemaDSL
 
 open Query
 open LibPQ
-open Insert
+open SchemaSyntax
+open SchemaDSL
 
 namespace Table
 
@@ -20,12 +22,11 @@ def listTables (conn : Connection) : IO (List String) := do
     | _ => []
   pure res
 
-inductive CreateScope where
-  | local
-  | global
-
-inductive SQLCreate where
-  | table : CreateScope → Bool → String → SQLFields → SQLCreate
-
-inductive CreateFields where
-  | fields : List String × InsertType → CreateFields
+def createTable (conn : Connection) (query : SQLCreate) : IO (Option ResultStatus) := do
+  let res ← exec conn query.toString
+  if resStatus res != .tuplesOk then
+    let error ← resErr res
+    IO.println <| error
+    pure Option.none
+  else
+    pure <| Option.some <| resStatus res

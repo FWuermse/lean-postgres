@@ -15,6 +15,9 @@ syntax "GLOBAL"                   : createScope
 declare_syntax_cat                  notExistsClause
 syntax "IF NOT EXISTS"            : notExistsClause
 
+declare_syntax_cat                  ExistsClause
+syntax "IF EXISTS"                : ExistsClause
+
 declare_syntax_cat                  insertType
 syntax "Char"                     : insertType
 syntax "Num"                      : insertType
@@ -25,6 +28,8 @@ declare_syntax_cat                  fieldDesc
 syntax "(" (ident insertType),+ ")" :  fieldDesc
 
 syntax (name := create) "CREATE " (createScope)? " TABLE " (notExistsClause)? ident fieldDesc : term
+
+syntax (name := drop) "DROP TABLE " (ExistsClause)? ident,+ : term
 
 def mkStrOfIdent (id : Syntax) : Expr :=
   mkStrLit id.getId.toString
@@ -41,7 +46,11 @@ def elabSQLType : TSyntax `insertType → TermElabM Expr
   | `(insertType|Date) => pure <| mkConst ``Univ.date
   | _ => throwUnsupportedSyntax
 
-def mkProd := (mkApp2 (mkConst ``Prod [0, 0]) (mkConst `String) (mkConst `Univ))
+def mkProd (fst : Name) (snd : Name) : Expr :=
+  (mkApp2 (mkConst ``Prod [0, 0]) (mkConst fst) (mkConst snd))
+
+def mkListFromArray (typ : Expr) (arr : Array Expr) : Expr :=
+  arr.foldl (fun init x => (mkApp2 (mkApp (mkConst ``List.cons [0]) typ) x init)) (mkApp (mkConst ``List.nil [0]) typ)
 
 def elabFieldDesc : TSyntax `fieldDesc → TermElabM Expr
   | `(fieldDesc|($[$id:ident $typ:insertType],*)) => do
@@ -49,18 +58,26 @@ def elabFieldDesc : TSyntax `fieldDesc → TermElabM Expr
     let typs ← typ.mapM (elabSQLType .)
     let zipped := Array.zip ids typs
     let prod := zipped.map (fun (x, y) => mkApp4 (mkConst ``Prod.mk [0, 0]) (mkConst ``String) (mkConst ``Univ) x y)
-    let list := prod.foldl (fun init x => (mkApp2 (mkApp (mkConst ``List.cons [0]) mkProd) x init)) (mkApp (mkConst `List.nil [0]) mkProd)
+    let list := mkListFromArray (mkProd `String `Univ) prod
     pure <| mkApp (mkConst ``CreateFields.mk) list
   | _ => throwUnsupportedSyntax
 
-@[term_elab create] def elabQuery : Term.TermElab := fun stx _ =>
+@[term_elab create] def elabCreate : Term.TermElab := fun stx _ =>
   match stx with
   | `(create| CREATE TABLE $id:ident $fd:fieldDesc) => do
-    pure <| mkApp4 (mkConst ``SQLCreate.mk) (mkConst ``CreateScope.global) (mkConst ``NotExistsClause.empty) (mkStrOfIdent id) (← elabFieldDesc fd)
+    pure <| mkApp4 (mkConst ``SQLCreate.mk) (mkConst ``CreateScope.default) (mkConst ``NotExistsClause.empty) (mkStrOfIdent id) (← elabFieldDesc fd)
   | `(create| CREATE $scope:createScope TABLE $id:ident $fd:fieldDesc) => do
     pure <| mkApp4 (mkConst ``SQLCreate.mk) (← elabCreateScope scope) (mkConst ``NotExistsClause.empty) (mkStrOfIdent id) (← elabFieldDesc fd)
   | `(create| CREATE TABLE $_:notExistsClause $id:ident $fd:fieldDesc) => do
-    pure <| mkApp4 (mkConst ``SQLCreate.mk) (mkConst ``CreateScope.global) (mkConst ``NotExistsClause.notExists) (mkStrOfIdent id) (← elabFieldDesc fd)
+    pure <| mkApp4 (mkConst ``SQLCreate.mk) (mkConst ``CreateScope.default) (mkConst ``NotExistsClause.notExists) (mkStrOfIdent id) (← elabFieldDesc fd)
   | `(create| CREATE $scope:createScope TABLE $_:notExistsClause $id:ident $fd:fieldDesc) => do
     pure <| mkApp4 (mkConst ``SQLCreate.mk) (← elabCreateScope scope) (mkConst ``NotExistsClause.notExists) (mkStrOfIdent id) (← elabFieldDesc fd)
+  | _ => throwUnsupportedSyntax
+
+@[term_elab drop] def elabDrop : Term.TermElab := fun stx _ =>
+  match stx with
+  | `(drop| DROP TABLE $_:ExistsClause $[$ids],*) => do
+    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.exists) (mkListFromArray (mkConst ``String [0]) (ids.map (mkStrOfIdent .)))
+  | `(drop| DROP TABLE $[$ids],*) => do
+    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.empty) (mkListFromArray (mkConst ``String [0]) (ids.map (mkStrOfIdent .)))
   | _ => throwUnsupportedSyntax

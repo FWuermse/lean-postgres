@@ -60,9 +60,9 @@ def toTaggedUniv {u : Univ} (x : u.interp) : TaggedUniv := match u with
 
 def Tuple.toStringList : Tuple xs → List String
   | Tuple.nil => []
-  | @Tuple.cons _ u y ys => match toTaggedUniv y with
+  | @Tuple.cons _ _ y ys => match toTaggedUniv y with
     | TaggedUniv.nat n => s!"{n}"::ys.toStringList
-    | TaggedUniv.char c => s!"'{c}'"::ys.toStringList
+    | TaggedUniv.char c => s!"{c}"::ys.toStringList
     | TaggedUniv.varchar vc => s!"{vc}"::ys.toStringList
     | TaggedUniv.date d => s!"{d}"::ys.toStringList
 
@@ -90,3 +90,4 @@ instance : ToByteArray InsertType where
 structure InsertQuery {α : List Univ} where
   table : String
   values : List (Tuple α)
+  -- TODO: fieldNames : List String

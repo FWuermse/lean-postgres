@@ -63,9 +63,8 @@ def connect (connectionInfo : String) : IO Connection :=
   PGconn *conn = PQconnectdb(conninfo);
   return lean_io_result_mk_ok(to_lean<Connection>(conn));
 
-
 alloy c extern "lean_pq_connection_status"
-def connStatus (connection : @& Connection) : ResultStatus :=
+def connStatus (connection : @& Connection) : ConnectionStatus :=
   PGresult *res;
   PGconn *conn = of_lean<Connection>(connection);
   ConnStatusType status = PQstatus(conn);
@@ -82,11 +81,6 @@ alloy c extern "lean_pq_get_error_message"
 def connErr (connection : @& Connection) : IO String :=
   PGconn *conn = of_lean<Connection>(connection);
   return lean_io_result_mk_ok(lean_mk_string(PQerrorMessage(conn)));
-
-alloy c extern "lean_pq_get_result_error_message"
-def resErr (result : @& Result) : IO String :=
-  PGresult *res = of_lean<Result>(result);
-  return lean_io_result_mk_ok(lean_mk_string(PQerrorMessage(res)));
 
 alloy c extern "lean_pq_fname"
 def fname (result : @& Result) (column_number : USize) : IO String :=
@@ -137,12 +131,12 @@ def execPrepared (connection : @& Connection) (statementName: String) (nParams :
   PGresult *res;
   const int *paramLengths = lean_sarray_cptr(parameterLengths);
   const int *paramFormats = lean_sarray_cptr(parameterLengths);
-  printf("number; %d\n", nParams);
+  printf("C: Number: %d\n", nParams);
   char **values = malloc(sizeof(void*)*nParams);
   for (int i = 0; i < nParams; i++) {
     char* current = lean_string_cstr(objects[i]);
     values[i] = current;
-    printf("%s\n", current);
+    printf("C: %s\n", current);
   }
   -- TODO: Retire paramTypes if it infers using NULL?
   res = PQexecPrepared(conn, stmtName, nParams, values, NULL, NULL, resultFormat);
@@ -168,3 +162,33 @@ def execParams (connection : @& Connection) (query : String) (nParams : USize) (
   res = PQexecParams(conn, qry, nParams, NULL, values, NULL, NULL, resultFormat);
   free(values);
   return lean_io_result_mk_ok(to_lean<Result>(res));
+
+def Result.toString : ResultStatus → String
+  | .tuplesOk        => "TuplesOk"
+  | .pipelineAborted => "pipelineAborted"
+  | .pipelineSync    => "pipelineSync"
+  | .singleTuple     => "singleTuple"
+  | .copyBoth        => "copyBoth"
+  | .fatalError      => "fatalError"
+  | .nonfatalError   => "nonfatalError"
+  | .badResponse     => "badResponse"
+  | .copyIn          => "copyIn"
+  | .copyOut         => "copyOut"
+  | .commandOk       => "commandOk"
+  | .emptyQuery      => "mptyQuery"
+
+def Connection.toString: ConnectionStatus → String
+  | .ok               => "CONNECTION_OK"
+  | .bad              => "CONNECTION_BAD"
+  | .started          => "CONNECTION_STARTED"
+  | .made             => "CONNECTION_MADE"
+  | .awaitingResponse => "CONNECTION_AWAITING_RESPONSE"
+  | .authOk           => "CONNECTION_AUTH_OK"
+  | .setenv           => "CONNECTION_SETENV"
+  | .sslStartup       => "CONNECTION_SSL_STARTUP"
+  | .needed           => "CONNECTION_NEEDED"
+  | .checkWritable    => "CONNECTION_CHECK_WRITABLE"
+  | .consume          => "CONNECTION_CONSUME"
+  | .gssStartup       => "CONNECTION_GSS_STARTUP"
+  | .checkTarget      => "CONNECTION_CHECK_TARGET"
+  | .checkStandby     => "CONNECTION_CHECK_STANDBY"

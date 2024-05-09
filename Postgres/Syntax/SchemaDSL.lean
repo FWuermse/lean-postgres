@@ -56,5 +56,8 @@ instance : ToString CreateFields :=
 def SQLCreate.toString : SQLCreate → String
   | mk scope notExistClause name fields => s!"CREATE {scope} TABLE {notExistClause} {name} {fields}"
 
+def SQLDrop.toString : SQLDrop → String
+  | mk e ids => s!"DROP TABLE {e} {", ".intercalate ids}"
+
 instance : ToString SQLCreate :=
   ⟨SQLCreate.toString⟩

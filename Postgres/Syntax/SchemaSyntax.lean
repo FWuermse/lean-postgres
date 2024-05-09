@@ -42,7 +42,8 @@ def elabCreateScope : TSyntax `createScope → TermElabM Expr
 def elabSQLType : TSyntax `insertType → TermElabM Expr
   | `(insertType|Char) => pure <| mkConst ``Univ.char
   | `(insertType|Num) => pure <| mkConst ``Univ.nat
-  | `(insertType|Varchar($n:num)) => pure <| mkApp (mkConst ``Univ.varchar) (mkNatLit n.getNat)
+  -- TODO: shouldn't be casted to nat
+  | `(insertType|Varchar($n:num)) => pure <| mkApp (mkConst ``Univ.varchar) (mkApp (mkConst ``Nat.toUInt8) (mkNatLit n.getNat))
   | `(insertType|Date) => pure <| mkConst ``Univ.date
   | _ => throwUnsupportedSyntax
 
@@ -50,7 +51,7 @@ def mkProd (fst : Name) (snd : Name) : Expr :=
   (mkApp2 (mkConst ``Prod [0, 0]) (mkConst fst) (mkConst snd))
 
 def mkListFromArray (typ : Expr) (arr : Array Expr) : Expr :=
-  arr.foldl (fun init x => (mkApp2 (mkApp (mkConst ``List.cons [0]) typ) x init)) (mkApp (mkConst ``List.nil [0]) typ)
+  arr.foldr (fun init x => (mkApp2 (mkApp (mkConst ``List.cons [0]) typ) init x)) (mkApp (mkConst ``List.nil [0]) typ)
 
 def elabFieldDesc : TSyntax `fieldDesc → TermElabM Expr
   | `(fieldDesc|($[$id:ident $typ:insertType],*)) => do
@@ -77,7 +78,7 @@ def elabFieldDesc : TSyntax `fieldDesc → TermElabM Expr
 @[term_elab drop] def elabDrop : Term.TermElab := fun stx _ =>
   match stx with
   | `(drop| DROP TABLE $_:ExistsClause $[$ids],*) => do
-    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.exists) (mkListFromArray (mkConst ``String [0]) (ids.map (mkStrOfIdent .)))
+    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.exists) (mkListFromArray (mkConst `String) (ids.map (mkStrOfIdent .)))
   | `(drop| DROP TABLE $[$ids],*) => do
-    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.empty) (mkListFromArray (mkConst ``String [0]) (ids.map (mkStrOfIdent .)))
+    pure <| mkApp2 (mkConst ``SQLDrop.mk) (mkConst ``ExistsClause.empty) (mkListFromArray (mkConst `String) (ids.map (mkStrOfIdent .)))
   | _ => throwUnsupportedSyntax

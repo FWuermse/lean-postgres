@@ -4,9 +4,9 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Syntax.InsertSyntax
+import Postgres
 
-open InsertSyntax
+open InsertSyntax LibPQ PQInsert Query
 
 def main : IO Unit := do
   let insertQuery :=
@@ -16,8 +16,11 @@ def main : IO Unit := do
       (Varchar(15) "Florian", Varchar(15) "Würmseer", 123, 'R', 2014-01-09),
       (Varchar(15) "Erin", Varchar(15) "Jaeger", 999, 'A', 850-03-30)
     ]
-  IO.print insertQuery.values
-  IO.print insertQuery.table
+  IO.println insertQuery.values
+  IO.println insertQuery.table
+  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
+  let status ← insert conn insertQuery
+
 
 -- Typechecks:
 #check [

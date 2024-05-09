@@ -6,37 +6,26 @@
 
 import Postgres
 
-open Insert
 open LibPQ
 open Query
-open Table
-
-def printStatus (res : Result) : IO Unit := do
-  let status := resStatus res
-  match status with
-   | .tuplesOk => IO.println "TuplesOk"
-   | .pipelineAborted => IO.println "pipelineAborted"
-   | .pipelineSync    => IO.println "pipelineSync"
-   | .singleTuple     => IO.println "singleTuple"
-   | .copyBoth        => IO.println "copyBoth"
-   | .fatalError      => IO.println "fatalError"
-   | .nonfatalError   => IO.println "nonfatalError"
-   | .badResponse     => IO.println "badResponse"
-   | .copyIn          => IO.println "copyIn"
-   | .copyOut         => IO.println "copyOut"
-   | .commandOk       => IO.println "commandOk"
-   | .emptyQuery      => IO.println "mptyQuery"
+open Schema
 
 def stringTables (table : Option (List (List String))) : String :=
-match table with
-| none => "Error"
-| some t => "\n".intercalate (t.map (", ".intercalate .))
+  match table with
+  | none => "Error"
+  | some t => "\n".intercalate (t.map (", ".intercalate .))
 
 def main : IO Unit := do
-  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
-  IO.println <| ← listTables conn
+  let conn₁ ← login "localhost" "5432" "postgres" "postgres" "password"
+  let conn₂ ← connect "host=localhost port=5432 dbname=postgres user=postgres password=password connect_timeout=10"
+  let status := connStatus conn₁
+  IO.println <| Connection.toString status
+  IO.println <| ← listTables conn₁
+  -- conn₂ closed due to ref count
+  IO.println <| ← listTables conn₂
   let query :=
     SELECT id, name, age
     FROM mytable
-  let res ← sendQuery conn query
+  -- conn₁ closed due to ref count
+  let res ← sendQuery conn₁ query
   IO.println $ stringTables res

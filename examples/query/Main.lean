@@ -6,9 +6,18 @@
 
 import Postgres
 
+open LibPQ Query
+
+def stringTables (table : Option (List (List String))) : String :=
+  match table with
+  | none => "Error"
+  | some t => "\n".intercalate (t.map (", ".intercalate .))
+
 def main : IO Unit := do
+  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
   let query :=
-    SELECT surname, nr, employment_date
+    SELECT *
     FROM employee
-    WHERE employee.employment_date <= "1800-12-30"
+  let res ← sendQuery conn query
+  IO.println $ stringTables res
   IO.println query

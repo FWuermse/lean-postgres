@@ -4,18 +4,17 @@
   Authors: Florian Würmseer, Jannis Limperg
 -/
 
-import Lean
 import Postgres.LibPQ
-import Postgres.Syntax.QuerySyntax
+import Postgres.Syntax.QueryDSL
 
-open LibPQ Connection Lean Meta Elab Elab.Term
+open LibPQ Connection
 
 namespace Query
 
 def sendQuery (connection : Connection) (query : SQLQuery) : IO <| Option <| List <| List String := do
   let res ← exec connection query.toString
   if resStatus res != .tuplesOk then
-    let error ← resErr res
+    let error ← connErr connection
     IO.println <| error
     pure Option.none
   else

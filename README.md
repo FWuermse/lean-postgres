@@ -37,9 +37,7 @@ Currently only simple queries and inserts are supported:
 ```lean
 import Postgres
 
-open PQInsert
-open Connect
-open Query
+open LibPQ Schema Query PQInsert Delete Query
 
 def main : IO Unit := do
   -- Open connection

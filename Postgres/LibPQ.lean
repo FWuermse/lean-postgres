@@ -131,12 +131,10 @@ def execPrepared (connection : @& Connection) (statementName: String) (nParams :
   PGresult *res;
   const int *paramLengths = lean_sarray_cptr(parameterLengths);
   const int *paramFormats = lean_sarray_cptr(parameterLengths);
-  printf("C: Number: %d\n", nParams);
   char **values = malloc(sizeof(void*)*nParams);
   for (int i = 0; i < nParams; i++) {
     char* current = lean_string_cstr(objects[i]);
     values[i] = current;
-    printf("C: %s\n", current);
   }
   -- TODO: Retire paramTypes if it infers using NULL?
   res = PQexecPrepared(conn, stmtName, nParams, values, NULL, NULL, resultFormat);

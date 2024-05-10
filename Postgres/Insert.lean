@@ -18,14 +18,12 @@ def insert {α : List Univ} (conn : Connection) (query : @InsertQuery α) : IO (
   let placeholders := placeholders.map (s!"${.}")
   -- TODO: sanitize
   let rawQuery := s!"INSERT INTO {table} VALUES ({", ".intercalate placeholders})"
-  IO.println rawQuery
   let res ← prepare conn seed rawQuery amount ⟨#[]⟩
   if resStatus res != .commandOk then
     let error ← connErr conn
     IO.println <| error
     pure Option.none
   else
-    let _ ← values.mapM (fun t => IO.println t.toStringList)
     let ress ← values.mapM (
       fun t => execPrepared conn seed amount t.toStringList.toArray ⟨#[]⟩ ⟨#[]⟩ 0
     )

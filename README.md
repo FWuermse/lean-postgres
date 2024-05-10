@@ -44,13 +44,17 @@ open Query
 def main : IO Unit := do
   -- Open connection
   let conn ← login "localhost" "5432" "postgres" "postgres" "password"
-  let insertQuery :=
+
+  -- Create table
+  let createQuery :=
     CREATE TABLE IF NOT EXISTS employee (name Varchar(15), surname Varchar(15), nr Num, letter Char, employment_date Date)
-  let res ← createTable conn insertQuery
+  let res ← createTable conn createQuery
   if let .some r := res then
     IO.println $ Result.toString r
+
   -- Print tables
   IO.println <| ← listTables conn
+
   -- Insert values
   let insertQuery :=
     INSERT INTO employee
@@ -61,14 +65,25 @@ def main : IO Unit := do
     ]
   let _status ← insert conn insertQuery
 
+  -- Query values
   let query := 
     SELECT surname, nr, employment_date
     FROM employee 
     WHERE employee.employment_date <= "1800-12-31"
-
   let res ← sendQuery conn query
   if let .some r := res then
-    IO.println <| >"\n".intercalate (r.map (", ".intercalate .))
+    IO.println <| "\n".intercalate (r.map (", ".intercalate .))
+    
+  -- Delete entries again
+  let deleteQuery :=
+    DELETE FROM employee WHERE nr = 123 OR nr = 999
+  let _ ← delete conn deleteQuery
+  
+  -- Drop table again
+  let dropQuery :=
+    DROP TABLE IF EXISTS employee
+  let _ ← dropTable conn dropQuery
+  -- Connection closed and objects freed ipmlicitly after last use of conn
 ```
 
 Output:
@@ -77,7 +92,7 @@ Output:
 NOTICE:  relation "employee" already exists, skipping
 commandOk
 [mytable, employee]
-'Jaeger', 999, 0850-03-30
+Jaeger, 999, 0850-03-30
 ```
 
 Please find more examples in the [example folder](https://github.com/FWuermse/lean-postgres/tree/master/examples/open-connection).

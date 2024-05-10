@@ -12,14 +12,14 @@ inductive Varchar (i : UInt8) where
 
 instance : ToString (Varchar i) where
   toString vc := match vc with
-    | Varchar.mk s _ => s!"'{s}'"
+    | Varchar.mk s _ => s!"{s}"
 
 inductive Date where
   | mk : (y : Nat) → (m : Fin 13) → (d : Fin 32) → (h : m > 0 ∧ d > 0 := by simp) →  Date
 
 instance : ToString Date where
   toString date := match date with
-    | Date.mk y m d _ => s!"'{y}-{m}-{d}'"
+    | Date.mk y m d _ => s!"{y}-{m}-{d}"
 
 inductive Univ
   | nat

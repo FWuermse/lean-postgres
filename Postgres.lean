@@ -3,6 +3,7 @@
 import Postgres.Util
 import Postgres.Parse
 import Postgres.Query
+import Postgres.Delete
 import Postgres.Insert
 import Postgres.Syntax
 import Postgres.LibPQ

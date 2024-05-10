@@ -6,7 +6,7 @@
 
 import Postgres
 
-open InsertSyntax LibPQ PQInsert Query
+open InsertSyntax DeleteSyntax LibPQ PQInsert Delete Query
 
 def main : IO Unit := do
   let insertQuery :=
@@ -19,8 +19,19 @@ def main : IO Unit := do
   IO.println insertQuery.values
   IO.println insertQuery.table
   let conn ← login "localhost" "5432" "postgres" "postgres" "password"
-  let status ← insert conn insertQuery
-
+  let _ ← insert conn insertQuery
+  let deleteQuery :=
+    DELETE FROM employee WHERE nr = 123 OR nr = 999
+  let query :=
+    SELECT *
+    FROM employee
+  let res ← sendQuery conn query
+  if let .some r := res then
+    IO.println <| "\n".intercalate (r.map (", ".intercalate .))
+  let _ ← delete conn deleteQuery
+  let res ← sendQuery conn query
+  if let .some r := res then
+    IO.println <| "\n".intercalate (r.map (", ".intercalate .))
 
 -- Typechecks:
 #check [

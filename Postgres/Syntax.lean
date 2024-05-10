@@ -2,6 +2,8 @@ import Postgres.Syntax.Utils
 import Postgres.Syntax.QueryDSL
 import Postgres.Syntax.QuerySyntax
 import Postgres.Syntax.DataEntries
+import Postgres.Syntax.DeleteDSL
+import Postgres.Syntax.DeleteSyntax
 import Postgres.Syntax.InsertDSL
 import Postgres.Syntax.InsertSyntax
 import Postgres.Syntax.SchemaDSL

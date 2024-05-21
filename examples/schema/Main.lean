@@ -14,12 +14,12 @@ def main : IO Unit := do
   let dropQuery :=
     DROP TABLE IF EXISTS employee
   let res ← dropTable conn dropQuery
-  if let .some r := res then
-    IO.println $ Result.toString r
+  if let .ok r := res then
+    IO.println $ r.toString
   let insertQuery :=
     CREATE TABLE IF NOT EXISTS employee (name Varchar(15), surname Varchar(15), nr Num, letter Char, employment_date Date)
   IO.println insertQuery.toString
   let res ← createTable conn insertQuery
-  if let .some r := res then
-    IO.println $ Result.toString r
+  if let .ok r := res then
+    IO.println $ r.toString
   IO.println <| ← listTables conn

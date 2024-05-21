@@ -21,20 +21,19 @@ def listTables (conn : Connection) : IO (List String) := do
     | _ => []
   pure res
 
-def createTable (conn : Connection) (query : SQLCreate) : IO (Option ResultStatus) := do
+def createTable (conn : Connection) (query : SQLCreate) : IO Response := do
   let res ← exec conn query.toString
-  if resStatus res != .commandOk then
-    let error ← connErr conn
-    IO.println <| error
-    pure Option.none
+  if res.status != .commandOk then
+    let errorMessage ← conn.error
+    pure <| .error errorMessage
   else
-    pure <| Option.some <| resStatus res
+    pure <| .ok res.status
 
-def dropTable (conn : Connection) (query : SQLDrop) : IO (Option ResultStatus) := do
+def dropTable (conn : Connection) (query : SQLDrop) : IO Response := do
   let res ← exec conn query.toString
-  if resStatus res != .commandOk then
-    let error ← connErr conn
-    IO.println <| error
-    pure Option.none
+  if res.status != .commandOk then
+    let errorMessage ← conn.error
+    IO.println <| errorMessage
+    pure <| .error errorMessage
   else
-    pure <| Option.some <| resStatus res
+    pure <| .ok res.status

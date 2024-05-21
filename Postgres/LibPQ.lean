@@ -64,21 +64,21 @@ def connect (connectionInfo : String) : IO Connection :=
   return lean_io_result_mk_ok(to_lean<Connection>(conn));
 
 alloy c extern "lean_pq_connection_status"
-def connStatus (connection : @& Connection) : ConnectionStatus :=
+def Connection.status (connection : @& Connection) : ConnectionStatus :=
   PGresult *res;
   PGconn *conn = of_lean<Connection>(connection);
   ConnStatusType status = PQstatus(conn);
   return of_lean<ConnectionStatus>(status);
 
 alloy c extern "lean_pq_result_status"
-def resStatus (result : @& Result) : ResultStatus :=
+def Result.status (result : @& Result) : ResultStatus :=
   PGresult *res;
   res = of_lean<Result>(result);
   ExecStatusType status = PQresultStatus(res);
   return of_lean<ResultStatus>(status);
 
 alloy c extern "lean_pq_get_error_message"
-def connErr (connection : @& Connection) : IO String :=
+def Connection.error (connection : @& Connection) : IO String :=
   PGconn *conn = of_lean<Connection>(connection);
   return lean_io_result_mk_ok(lean_mk_string(PQerrorMessage(conn)));
 
@@ -161,7 +161,9 @@ def execParams (connection : @& Connection) (query : String) (nParams : USize) (
   free(values);
   return lean_io_result_mk_ok(to_lean<Result>(res));
 
-def Result.toString : ResultStatus → String
+abbrev Response := Except String ResultStatus
+
+def ResultStatus.toString : ResultStatus → String
   | .tuplesOk        => "TuplesOk"
   | .pipelineAborted => "pipelineAborted"
   | .pipelineSync    => "pipelineSync"
@@ -175,7 +177,7 @@ def Result.toString : ResultStatus → String
   | .commandOk       => "commandOk"
   | .emptyQuery      => "mptyQuery"
 
-def Connection.toString: ConnectionStatus → String
+def ConnectionStatus.toString: ConnectionStatus → String
   | .ok               => "CONNECTION_OK"
   | .bad              => "CONNECTION_BAD"
   | .started          => "CONNECTION_STARTED"

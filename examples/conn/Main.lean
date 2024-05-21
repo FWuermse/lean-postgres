@@ -18,8 +18,8 @@ def stringTables (table : Option (List (List String))) : String :=
 def main : IO Unit := do
   let conn₁ ← login "localhost" "5432" "postgres" "postgres" "password"
   let conn₂ ← connect "host=localhost port=5432 dbname=postgres user=postgres password=password connect_timeout=10"
-  let status := connStatus conn₁
-  IO.println <| Connection.toString status
+  let status := conn₁.status
+  IO.println <| status.toString
   IO.println <| ← listTables conn₁
   -- conn₂ closed due to ref count
   IO.println <| ← listTables conn₂

@@ -7,9 +7,9 @@ namespace Delete
 
 def delete (conn : Connection) (query : SQLDelete) : IO (Option ResultStatus) := do
   let res ← exec conn query.toString
-  if resStatus res != .tuplesOk then
-    let error ← connErr conn
+  if res.status != .tuplesOk then
+    let error ← conn.error
     IO.println <| error
-    pure Option.none
+    pure .none
   else
-    pure <| resStatus res
+    pure <| res.status

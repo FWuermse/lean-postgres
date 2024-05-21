@@ -13,13 +13,13 @@ namespace Query
 
 def sendQuery (connection : Connection) (query : SQLQuery) : IO <| Option <| List <| List String := do
   let res ← exec connection query.toString
-  if resStatus res != .tuplesOk then
-    let error ← connErr connection
+  if res.status != .tuplesOk then
+    let error ← connection.error
     IO.println <| error
-    pure Option.none
+    pure .none
   else
     let rows := List.map Nat.toUSize <| List.range (← nTuples res).toNat
     let columns := List.map Nat.toUSize <| List.range (← nFields res).toNat
-    let table ← rows.mapM (λ x: USize => columns.mapM (λ y: USize => (getValue res x y)))
+    let table ← rows.mapM fun x => columns.mapM fun y => getValue res x y
     pure table
 end Query

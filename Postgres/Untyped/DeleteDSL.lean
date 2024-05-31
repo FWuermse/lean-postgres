@@ -1,4 +1,4 @@
-import Postgres.Syntax.QueryDSL
+import Postgres.Untyped.QueryDSL
 
 namespace DeleteDSL
 

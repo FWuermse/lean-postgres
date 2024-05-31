@@ -6,7 +6,7 @@
 
 import Postgres
 
-open SchemaSyntax LibPQ Schema
+open DDLSyntax LibPQ DDL
 
 def main : IO Unit := do
   let conn ← login "localhost" "5432" "postgres" "postgres" "password"

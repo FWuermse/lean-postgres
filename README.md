@@ -37,7 +37,7 @@ Currently only simple queries and inserts are supported:
 ```lean
 import Postgres
 
-open LibPQ Schema Query PQInsert Delete Query
+open LibPQ DDL Query PQInsert Delete Query
 
 def main : IO Unit := do
   -- Open connection
@@ -96,4 +96,4 @@ Jaeger, 999, 0850-03-30
 Please find more examples in the [example folder](https://github.com/FWuermse/lean-postgres/tree/master/examples/open-connection).
 
 ## TODOs
-- [ ] Schema validation
+- [ ] DDL validation

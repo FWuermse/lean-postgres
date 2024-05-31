@@ -1,12 +1,12 @@
-import Postgres.Syntax.InsertDSL
-import Postgres.Syntax.SchemaDSL
+import Postgres.Untyped.InsertDSL
+import Postgres.Untyped.DDLDSL
 import Lean
 
 open InsertDSL
-open SchemaDSL
+open DDLDSL
 open Lean Elab Meta
 
-namespace SchemaSyntax
+namespace DDLSyntax
 
 declare_syntax_cat                  createScope
 syntax "LOCAL"                    : createScope

@@ -8,7 +8,7 @@ import Postgres
 
 open LibPQ
 open Query
-open Schema
+open DDL
 
 def stringTables (table : Option (List (List String))) : String :=
   match table with

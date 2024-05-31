@@ -25,5 +25,5 @@
    "inherited": false,
    "dir": "./../..",
    "configFile": "lakefile.lean"}],
- "name": "schema",
+ "name": "DDL",
  "lakeDir": ".lake"}

@@ -4,13 +4,13 @@
   Authors: Arthur Paulino, Florian Würmseer
 -/
 
-import Postgres.Syntax.DataEntries
+import Postgres.Schema.DataEntries
 
 inductive SQLSelectField
   | col   : String → SQLSelectField
   | alias : String → String         → SQLSelectField
 
-inductive SQLSelect
+inductive SQLSelect (α : List Field)
   | list : Bool → List SQLSelectField → SQLSelect
   | all  : Bool → SQLSelect
 

@@ -5,7 +5,7 @@
 -/
 
 import Lean
-import Postgres.Syntax.QueryDSL
+import Postgres.Untyped.QueryDSL
 
 open Lean Elab Meta
 

@@ -1,4 +1,4 @@
-import Postgres.Syntax.InsertDSL
+import Postgres.Schema.InsertDSL
 
 open InsertDSL
 

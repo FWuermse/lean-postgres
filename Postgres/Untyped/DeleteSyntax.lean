@@ -1,5 +1,5 @@
-import Postgres.Syntax.DeleteDSL
-import Postgres.Syntax.QuerySyntax
+import Postgres.Untyped.DeleteDSL
+import Postgres.Untyped.QuerySyntax
 
 open DeleteDSL
 open QuerySyntax

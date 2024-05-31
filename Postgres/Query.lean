@@ -5,7 +5,7 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Syntax.QueryDSL
+import Postgres.Untyped.QueryDSL
 
 open LibPQ Connection
 

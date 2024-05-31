@@ -5,6 +5,7 @@ import Postgres.Parse
 import Postgres.Query
 import Postgres.Delete
 import Postgres.Insert
-import Postgres.Syntax
-import Postgres.LibPQ
 import Postgres.Schema
+import Postgres.LibPQ
+import Postgres.DDL
+import Postgres.Untyped

@@ -1,7 +1,7 @@
-import Postgres.Syntax.InsertDSL
-import Postgres.Syntax.InsertSyntax
+import Postgres.Untyped.InsertDSL
+import Postgres.Untyped.InsertSyntax
 
-namespace SchemaDSL
+namespace DDLDSL
 
 inductive CreateScope where
   | default

@@ -6,13 +6,21 @@
 
 import Postgres.Schema.DataEntries
 
-inductive SQLSelectField
-  | col   : String → SQLSelectField
-  | alias : String → String         → SQLSelectField
+inductive Field
+  | nat : String → Field
+  | varchar (n : UInt8) : String → Field
+  | chat : String → Field
+  | date : String → Field
+  | nil  : String → Field
+  deriving BEq, Repr
+
+inductive SQLSelectField (α: Field)
+  | col   : String → SQLSelectField α
+  | alias : String → String         → SQLSelectField α
 
 inductive SQLSelect (α : List Field)
-  | list : Bool → List SQLSelectField → SQLSelect
-  | all  : Bool → SQLSelect
+  | list : Bool → List (SQLSelectField a) → SQLSelect α
+  | all  : Bool → SQLSelect α
 
 inductive SQLProp
   | tt : SQLProp
@@ -36,31 +44,31 @@ inductive SQLProp
 inductive SQLJoin
   | inner | left | right | outer
 
-inductive SQLFrom
-  | table        : String  → SQLFrom
-  | alias        : SQLFrom → String  → SQLFrom
-  | join         : SQLJoin → SQLFrom → SQLFrom → SQLProp → SQLFrom
-  | implicitJoin : SQLFrom → SQLFrom → SQLFrom
+-- TODO: Condition proofs for joins?
+inductive SQLFrom (α : List Field)
+  | table        : String  → SQLFrom α
+  | alias        : SQLFrom α → String  → SQLFrom α
+  | join         : SQLJoin → SQLFrom α → SQLFrom α → SQLProp → SQLFrom α
+  | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
+  | nested       : SQLSelect α → SQLFrom α
 
-structure SQLQuery where
-  SELECT : SQLSelect
-  FROM   : SQLFrom
-  WHERE  : SQLProp
+inductive SQLQuery (α : List Field) where
+  | mk : SQLSelect α → SQLFrom α → SQLProp → SQLQuery α
 
-def SQLSelectField.toString : SQLSelectField → String
+def SQLSelectField.toString : SQLSelectField α → String
   | col   c   => c
   | .alias c a => s!"{c} AS {a}"
 
-instance : ToString SQLSelectField := ⟨SQLSelectField.toString⟩
+instance : ToString (SQLSelectField α) := ⟨SQLSelectField.toString⟩
 
 def SQLSelect.distinct? (d : Bool) : String :=
   if d then "DISTINCT " else default
 
-def SQLSelect.toString : SQLSelect → String
+def SQLSelect.toString : SQLSelect α → String
   | list d l => (distinct? d).append $ ", ".intercalate $ l.map (SQLSelectField.toString)
   | all  d   => (distinct? d).append $ "*"
 
-instance : ToString SQLSelect := ⟨SQLSelect.toString⟩
+instance : ToString (SQLSelect α) := ⟨SQLSelect.toString⟩
 
 def SQLProp.toString : SQLProp → String
   | tt      => "TRUE"
@@ -91,15 +99,16 @@ def SQLJoin.toString : SQLJoin → String
 
 instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
-def SQLFrom.toString : SQLFrom → String
+def SQLFrom.toString : SQLFrom α → String
   | table s            => s
   | .alias f s          => s!"({f.toString}) AS {s}"
   | join  j l r p      => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
   | implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
+  | nested s           => s!"({s})"
 
-instance : ToString SQLFrom := ⟨SQLFrom.toString⟩
+instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
-def SQLQuery.toString (q : SQLQuery) : String :=
-  s!"SELECT {q.SELECT} FROM {q.FROM} WHERE {q.WHERE}"
+def SQLQuery.toString : SQLQuery α → String
+  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
 
-instance : ToString SQLQuery := ⟨SQLQuery.toString⟩
+instance : ToString (SQLQuery α) := ⟨SQLQuery.toString⟩

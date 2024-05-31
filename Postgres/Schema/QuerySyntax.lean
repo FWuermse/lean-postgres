@@ -7,7 +7,7 @@
 import Lean
 import Postgres.Schema.QueryDSL
 
-open Lean Elab Meta
+open Lean Elab Meta Term
 
 namespace QuerySyntax
 
@@ -66,26 +66,31 @@ syntax sqlFrom " AS " ident                      : sqlFrom
 syntax sqlFrom join " JOIN " sqlFrom " ON " prop : sqlFrom
 syntax "(" sqlFrom ")"                           : sqlFrom
 
-syntax (name := query) "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)? : term
+syntax (name := query) "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)? ident : term
 
 def mkStrOfIdent (id : Syntax) : Expr :=
   mkStrLit id.getId.toString
+
+abbrev SchemaTermElabM := StateRefT Expr TermElabM
 
 partial def elabStrOfParsId : Syntax → TermElabM Expr
   | `(parsId|$id:ident)      => pure $ mkStrLit id.getId.toString
   | `(parsId|($pars:parsId)) => elabStrOfParsId pars
   | _                        => throwUnsupportedSyntax
 
-def elabCol : TSyntax `selectField → TermElabM Expr
+def elabCol : TSyntax `selectField → SchemaTermElabM Expr
   | `(selectField|$c:parsId)             => do
     mkAppM `SQLSelectField.col #[← elabStrOfParsId c]
   | `(selectField|$c:parsId AS $a:ident) => do
     mkAppM `SQLSelectField.alias #[← elabStrOfParsId c, mkStrOfIdent a]
   | _                                    => throwUnsupportedSyntax
 
-def elabSelect : Syntax → TermElabM Expr
-  | `(sqlSelect|*)                          => mkAppM `SQLSelect.all #[mkConst ``false]
-  | `(sqlSelect|DISTINCT *)                 => mkAppM `SQLSelect.all #[mkConst ``true]
+def elabSelect : Syntax → SchemaTermElabM Expr
+  | `(sqlSelect|*)                          => do
+    pure <| mkApp2 (mkConst ``SQLSelect.all) (← get) (mkConst ``false)
+  | `(sqlSelect|DISTINCT *)                 => do
+    let typ ← get
+    mkAppM `SQLSelect.all #[mkConst ``true, typ]
   | `(sqlSelect|$cs:selectField,*)          => do
     let cols ← mkListLit (mkConst `SQLSelectField) (← cs.getElems.toList.mapM elabCol)
     mkAppM `SQLSelect.list #[mkConst ``false, cols]
@@ -121,7 +126,7 @@ partial def elabEntry : TSyntax `entry → TermElabM Expr
   | `(entry|($e:entry))        => elabEntry e
   | _                          => throwUnsupportedSyntax
 
-def elabPropSymbol (stx : Syntax) (isEntry : Bool) : TermElabM Name :=
+def elabPropSymbol (stx : TSyntax `propSymbol) (isEntry : Bool) : TermElabM Name :=
   match stx with
   | `(propSymbol|=)  => pure $ if isEntry then `SQLProp.eqE else `SQLProp.eqC
   | `(propSymbol|<>) => pure $ if isEntry then `SQLProp.neE else `SQLProp.neC
@@ -132,7 +137,7 @@ def elabPropSymbol (stx : Syntax) (isEntry : Bool) : TermElabM Name :=
   | `(propSymbol|>=) => pure $ if isEntry then `SQLProp.geE else `SQLProp.geC
   | _                => throwUnsupportedSyntax
 
-partial def elabProp : Syntax → TermElabM Expr
+partial def elabProp : TSyntax `prop → TermElabM Expr
   | `(prop|TRUE)                              => elabConst `SQLProp.tt
   | `(prop|FALSE)                             => elabConst `SQLProp.ff
   | `(prop|$l:parsId $s:propSymbol $r:parsId) => do
@@ -155,8 +160,12 @@ def elabJoin : Syntax → TermElabM Expr
   | `(join|OUTER) => elabConst `SQLJoin.outer
   | _             => throwUnsupportedSyntax
 
-partial def elabFrom : Syntax → TermElabM Expr
-  | `(sqlFrom|$t:ident)               => mkAppM `SQLFrom.table #[mkStrOfIdent t]
+partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
+  | `(sqlFrom|$t:ident)               => do
+    let ctx ← get
+    let app := (mkApp ctx (mkStrOfIdent t))
+    set app
+    pure <| mkApp2 (mkConst `SQLFrom.table) app (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
     mkAppM `SQLFrom.alias #[← elabFrom f, mkStrOfIdent t]
   | `(sqlFrom|$t₁:sqlFrom, $t₂:sqlFrom) => do mkAppM `SQLFrom.implicitJoin #[← elabFrom t₁, ← elabFrom t₂]
@@ -165,11 +174,33 @@ partial def elabFrom : Syntax → TermElabM Expr
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
 
-@[term_elab query] def elabQuery : Term.TermElab := fun stx _ =>
+def elabFromSelect : TSyntax `sqlSelect → TSyntax `sqlFrom → SchemaTermElabM (Expr × Expr)
+  | s, f => do
+    let ctx ← get
+    let frm ← (elabFrom f).run ctx
+    set frm.snd
+    let sel ← (elabSelect s).run (← get)
+    pure (frm.fst, sel.fst)
+
+@[term_elab query] def elabQuery : TermElab := fun stx _ =>
   match stx with
-  | `(query| SELECT $sel FROM $frm $[WHERE $prp]?) => do
-    let whr ← match prp with
-    | none     => elabConst `SQLProp.tt
-    | some prp => elabProp prp
-    mkAppM `SQLQuery.mk #[← elabSelect sel, ← elabFrom frm, whr]
+  | `(query| SELECT $sel FROM $frm $[WHERE $prp]? $schema) => do
+    let env ← getEnv
+    if let .some s := env.find? schema.getId then
+      let whr ← match prp with
+      | none     => elabConst `SQLProp.tt
+      | some prp => elabProp prp
+      let ((frm, sel), _) ← (elabFromSelect sel frm).run s.value!
+      logInfo frm
+      logInfo sel
+      mkAppM `SQLQuery.mk #[sel, frm, whr]
+    else
+      throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
+
+def schema (table : String) : List Field := match table with
+  | "myTable" => [Field.nat "id", Field.nat "name"]
+  | "otherTable" => [Field.date "date"]
+  | _ => []
+
+def x := SELECT * FROM myTable QuerySyntax.schema

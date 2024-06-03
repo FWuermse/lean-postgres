@@ -73,10 +73,36 @@ def mkStrOfIdent (id : Syntax) : Expr :=
 
 abbrev SchemaTermElabM := StateRefT Expr TermElabM
 
+def exprToField : Expr → SchemaTermElabM Field
+  | Expr.app ctor (Expr.lit $ Literal.strVal s) =>
+    let res := match ctor with
+      | (Expr.const `Field.nat _) => (Field.nat s)
+      | (Expr.app (Expr.const `Field.varchar _) (Expr.lit $ Literal.natVal n)) => (Field.varchar n.toUInt8 s)
+      | (Expr.const `Field.char _) => (Field.char s)
+      | (Expr.const `Field.date _) => (Field.date s)
+      | (Expr.const `Field.nil _) => (Field.nil s)
+      | _ => Field.nil ""
+    return res
+  | _ =>
+    return Field.nil ""
+
+def elabField : Field → SchemaTermElabM Expr
+  | Field.nat s => pure <| mkApp (mkConst `Field.nat) (mkStrLit s)
+  | Field.varchar n s => pure <| mkApp2 (mkConst `Field.varchar) (mkNatLit n.toNat) (mkStrLit s)
+  | Field.char s => pure <| mkApp (mkConst `Field.char) (mkStrLit s)
+  | Field.date s => pure <| mkApp (mkConst `Field.date) (mkStrLit s)
+  | Field.nil s => pure <| mkApp (mkConst `Field.nil) (mkStrLit s)
+
+
 partial def elabStrOfParsId : Syntax → TermElabM Expr
-  | `(parsId|$id:ident)      => pure $ mkStrLit id.getId.toString
+  | `(parsId|$id:ident)      => pure $ mkStrOfIdent id
   | `(parsId|($pars:parsId)) => elabStrOfParsId pars
   | _                        => throwUnsupportedSyntax
+
+partial def parsIdToString : Syntax → String
+  | `(parsId|$id:ident)      => id.getId.toString
+  | `(parsId|($pars:parsId)) => parsIdToString pars
+  | _                        => ""
 
 def elabCol : TSyntax `selectField → SchemaTermElabM Expr
   | `(selectField|$c:parsId)             => do
@@ -85,18 +111,41 @@ def elabCol : TSyntax `selectField → SchemaTermElabM Expr
     mkAppM `SQLSelectField.alias #[← elabStrOfParsId c, mkStrOfIdent a]
   | _                                    => throwUnsupportedSyntax
 
-def elabSelect : Syntax → SchemaTermElabM Expr
+def elabProjType (cols : List (TSyntax `selectField)): SchemaTermElabM Expr := do
+  let expr ← get
+  let mut selType : List Field := []
+    if let .some exprs := expr.listLit? then
+      let exprs ← exprs.snd.mapM exprToField
+      for typ in cols do
+        match typ with
+          | `(selectField|$c:parsId) => do
+            let id := parsIdToString c
+            if let .some field := exprs.find? (fun f => f.getName == id) then
+              selType := selType.append [field]
+          | `(selectField|$c:parsId AS $_) => do
+            let id := parsIdToString c
+            if let .some field := exprs.find? (fun f => f.getName == id) then
+              selType := selType.append [field]
+          | _ => throwUnsupportedSyntax
+    else
+      throwUnsupportedSyntax
+    mkListLit (mkConst `Field) (← selType.mapM elabField)
+
+def elabSelect : TSyntax `sqlSelect → SchemaTermElabM Expr
   | `(sqlSelect|*)                          => do
     pure <| mkApp2 (mkConst ``SQLSelect.all) (← get) (mkConst ``false)
   | `(sqlSelect|DISTINCT *)                 => do
-    let typ ← get
-    mkAppM `SQLSelect.all #[mkConst ``true, typ]
+    pure <| mkApp2 (mkConst `SQLSelect.all) (← get) (mkConst ``true)
   | `(sqlSelect|$cs:selectField,*)          => do
     let cols ← mkListLit (mkConst `SQLSelectField) (← cs.getElems.toList.mapM elabCol)
-    mkAppM `SQLSelect.list #[mkConst ``false, cols]
+    let typ ← elabProjType cs.getElems.toList
+    set typ
+    pure <| mkApp3 (mkConst `SQLSelect.list) typ (mkConst ``false) (cols)
   | `(sqlSelect|DISTINCT $cs:selectField,*) => do
     let cols ← mkListLit (mkConst `SQLSelectField) (← cs.getElems.toList.mapM elabCol)
-    mkAppM `SQLSelect.list #[mkConst ``true, cols]
+    let typ ← elabProjType cs.getElems.toList.eraseDup
+    set typ
+    pure <| mkApp3 (mkConst `SQLSelect.list) typ (mkConst ``false) (cols)
   | _                                       => throwUnsupportedSyntax
 
 def mkApp' (name : Name) (e : Expr) : Expr :=
@@ -163,7 +212,7 @@ def elabJoin : Syntax → TermElabM Expr
 partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|$t:ident)               => do
     let ctx ← get
-    let app := (mkApp ctx (mkStrOfIdent t))
+    let app ← whnf (mkApp ctx (mkStrOfIdent t))
     set app
     pure <| mkApp2 (mkConst `SQLFrom.table) app (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
@@ -174,26 +223,24 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
 
-def elabFromSelect : TSyntax `sqlSelect → TSyntax `sqlFrom → SchemaTermElabM (Expr × Expr)
+def elabFromSelect : TSyntax `sqlSelect → TSyntax `sqlFrom → SchemaTermElabM (Expr × Expr × Expr)
   | s, f => do
     let ctx ← get
-    let frm ← (elabFrom f).run ctx
-    set frm.snd
-    let sel ← (elabSelect s).run (← get)
-    pure (frm.fst, sel.fst)
+    let (frm, ftyp) ← (elabFrom f).run ctx
+    set ftyp
+    let (sel, styp) ← (elabSelect s).run (← get)
+    pure (frm, sel, styp)
 
 @[term_elab query] def elabQuery : TermElab := fun stx _ =>
   match stx with
-  | `(query| SELECT $sel FROM $frm $[WHERE $prp]? $schema) => do
+  | `(query| SELECT $sel FROM $frm $[WHERE $prp]? $schema) => withAutoBoundImplicit do
     let env ← getEnv
     if let .some s := env.find? schema.getId then
       let whr ← match prp with
       | none     => elabConst `SQLProp.tt
       | some prp => elabProp prp
-      let ((frm, sel), _) ← (elabFromSelect sel frm).run s.value!
-      logInfo frm
-      logInfo sel
-      mkAppM `SQLQuery.mk #[sel, frm, whr]
+      let ((frm, sel, styp), ftyp) ← (elabFromSelect sel frm).run s.value!
+      pure <| mkApp5 (mkConst `SQLQuery.mk) ftyp styp sel frm whr
     else
       throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
@@ -203,4 +250,5 @@ def schema (table : String) : List Field := match table with
   | "otherTable" => [Field.date "date"]
   | _ => []
 
-def x := SELECT * FROM myTable QuerySyntax.schema
+def x := SELECT id, name FROM myTable QuerySyntax.schema
+def y := x

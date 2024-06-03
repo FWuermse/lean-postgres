@@ -9,17 +9,34 @@ import Postgres.Schema.DataEntries
 inductive Field
   | nat : String → Field
   | varchar (n : UInt8) : String → Field
-  | chat : String → Field
+  | char : String → Field
   | date : String → Field
   | nil  : String → Field
   deriving BEq, Repr
 
-inductive SQLSelectField (α: Field)
-  | col   : String → SQLSelectField α
-  | alias : String → String         → SQLSelectField α
+def Field.ToString : Field → String
+  | nat s => s!"Nat {s}"
+  | varchar n s => s!"Varchar {n} {s}"
+  | char s => s!"Char {s}"
+  | date s => s!"Date {s}"
+  | nil s => s!"Nil {s}"
+
+def Field.getName : Field → String
+  | nat s => s
+  | varchar _ s => s
+  | char s => s
+  | date s => s
+  | nil s => s
+
+instance : ToString Field :=
+  ⟨Field.ToString⟩
+
+inductive SQLSelectField
+  | col   : String → SQLSelectField
+  | alias : String → String         → SQLSelectField
 
 inductive SQLSelect (α : List Field)
-  | list : Bool → List (SQLSelectField a) → SQLSelect α
+  | list : Bool → List SQLSelectField → SQLSelect α
   | all  : Bool → SQLSelect α
 
 inductive SQLProp
@@ -52,14 +69,14 @@ inductive SQLFrom (α : List Field)
   | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
   | nested       : SQLSelect α → SQLFrom α
 
-inductive SQLQuery (α : List Field) where
-  | mk : SQLSelect α → SQLFrom α → SQLProp → SQLQuery α
+inductive SQLQuery {β : List Field} (α : List Field) where
+  | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) → SQLQuery α
 
-def SQLSelectField.toString : SQLSelectField α → String
+def SQLSelectField.toString : SQLSelectField → String
   | col   c   => c
   | .alias c a => s!"{c} AS {a}"
 
-instance : ToString (SQLSelectField α) := ⟨SQLSelectField.toString⟩
+instance : ToString (SQLSelectField) := ⟨SQLSelectField.toString⟩
 
 def SQLSelect.distinct? (d : Bool) : String :=
   if d then "DISTINCT " else default
@@ -108,7 +125,7 @@ def SQLFrom.toString : SQLFrom α → String
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
-def SQLQuery.toString : SQLQuery α → String
-  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
+def SQLQuery.toString : @SQLQuery β α → String
+  | mk s f w _ => s!"SELECT {s} FROM {f} WHERE {w}"
 
-instance : ToString (SQLQuery α) := ⟨SQLQuery.toString⟩
+instance : ToString (@SQLQuery β α) := ⟨SQLQuery.toString⟩

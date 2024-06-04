@@ -67,10 +67,13 @@ inductive SQLFrom (α : List Field)
   | alias        : SQLFrom α → String  → SQLFrom α
   | join         : SQLJoin → SQLFrom α → SQLFrom α → SQLProp → SQLFrom α
   | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
-  | nested       : SQLSelect α → SQLFrom α
 
 inductive SQLQuery {β : List Field} (α : List Field) where
-  | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) → SQLQuery α
+  | mk : SQLSelect α → SQLFrom β → SQLProp → SQLQuery α
+
+inductive PGQuery {β : List Field} (α : List Field) where
+  | simple : SQLQuery α → PGQuery α
+  | nested : SQLSelect α → SQLQuery β → SQLProp → PGQuery α
 
 def SQLSelectField.toString : SQLSelectField → String
   | col   c   => c
@@ -121,11 +124,10 @@ def SQLFrom.toString : SQLFrom α → String
   | .alias f s          => s!"({f.toString}) AS {s}"
   | join  j l r p      => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
   | implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
-  | nested s           => s!"({s})"
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
 def SQLQuery.toString : @SQLQuery β α → String
-  | mk s f w _ => s!"SELECT {s} FROM {f} WHERE {w}"
+  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
 
 instance : ToString (@SQLQuery β α) := ⟨SQLQuery.toString⟩

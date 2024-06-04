@@ -66,7 +66,11 @@ syntax sqlFrom " AS " ident                      : sqlFrom
 syntax sqlFrom join " JOIN " sqlFrom " ON " prop : sqlFrom
 syntax "(" sqlFrom ")"                           : sqlFrom
 
-syntax (name := query) "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)? ident : term
+declare_syntax_cat                                                      query
+syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)?         : query
+syntax "SELECT " sqlSelect " FROM " "(" query ")" (" WHERE " prop)?   : query
+
+syntax (name := pgquery) "queryOn" ident " | " query : term
 
 def mkStrOfIdent (id : Syntax) : Expr :=
   mkStrLit id.getId.toString
@@ -135,6 +139,7 @@ def elabSelect : TSyntax `sqlSelect → SchemaTermElabM Expr
   | `(sqlSelect|*)                          => do
     pure <| mkApp2 (mkConst ``SQLSelect.all) (← get) (mkConst ``false)
   | `(sqlSelect|DISTINCT *)                 => do
+    -- TODO make distinct
     pure <| mkApp2 (mkConst `SQLSelect.all) (← get) (mkConst ``true)
   | `(sqlSelect|$cs:selectField,*)          => do
     let cols ← mkListLit (mkConst `SQLSelectField) (← cs.getElems.toList.mapM elabCol)
@@ -223,24 +228,37 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
 
-def elabFromSelect : TSyntax `sqlSelect → TSyntax `sqlFrom → SchemaTermElabM (Expr × Expr × Expr)
-  | s, f => do
-    let ctx ← get
-    let (frm, ftyp) ← (elabFrom f).run ctx
-    set ftyp
-    let (sel, styp) ← (elabSelect s).run (← get)
-    pure (frm, sel, styp)
-
-@[term_elab query] def elabQuery : TermElab := fun stx _ =>
-  match stx with
-  | `(query| SELECT $sel FROM $frm $[WHERE $prp]? $schema) => withAutoBoundImplicit do
-    let env ← getEnv
-    if let .some s := env.find? schema.getId then
-      let whr ← match prp with
+partial def elabQuery : TSyntax `query → SchemaTermElabM (Expr × Expr)
+  | `(query| SELECT $sel FROM $frm:sqlFrom $[WHERE $prp]?) => do
+    let whr ← match prp with
       | none     => elabConst `SQLProp.tt
       | some prp => elabProp prp
-      let ((frm, sel, styp), ftyp) ← (elabFromSelect sel frm).run s.value!
-      pure <| mkApp5 (mkConst `SQLQuery.mk) ftyp styp sel frm whr
+    let ctx ← get
+    let (frm, ftyp) ← (elabFrom frm).run ctx
+    set ftyp
+    let (sel, styp) ← (elabSelect sel).run (← get)
+    let query := mkApp5 (mkConst `SQLQuery.mk) ftyp styp sel frm whr
+    -- TODO why does this need 4 args not 3??
+    let pgquery := mkApp4 (mkConst `PGQuery.simple) ftyp styp ftyp query
+    set query
+    pure (pgquery, styp)
+  | `(query| SELECT $sel FROM ($query:query) $[WHERE $prp]?) => do
+   let whr ← match prp with
+      | none     => elabConst `SQLProp.tt
+      | some prp => elabProp prp
+    let ctx ← get
+    let ((qry, qtyp), rawQry) ← (elabQuery query).run ctx
+    let (sel, styp) ← (elabSelect sel).run qtyp
+    pure <| (mkApp6 (mkConst `PGQuery.nested) styp qtyp styp sel rawQry whr, qtyp)
+  | _ => throwUnsupportedSyntax
+
+@[term_elab pgquery] def elabPQQuery : TermElab := fun stx _ =>
+  match stx with
+  | `(pgquery| queryOn $schema | $query) => withAutoBoundImplicit do
+    let env ← getEnv
+    if let .some s := env.find? schema.getId then
+      let (query, _) ← (elabQuery query).run s.value!
+      pure query.fst
     else
       throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
@@ -250,5 +268,8 @@ def schema (table : String) : List Field := match table with
   | "otherTable" => [Field.date "date"]
   | _ => []
 
-def x := SELECT id, name FROM myTable QuerySyntax.schema
+def x := queryOn QuerySyntax.schema | SELECT id, name FROM myTable
 def y := x
+
+-- TODO outer type must be limited to inner type in respect to '*'
+def z := queryOn QuerySyntax.schema | SELECT * FROM ( SELECT id, name FROM myTable )

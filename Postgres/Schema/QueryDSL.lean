@@ -5,6 +5,7 @@
 -/
 
 import Postgres.Schema.DataEntries
+import Postgres.Schema.InsertDSL
 
 inductive Field
   | nat : String → Field
@@ -68,12 +69,26 @@ inductive SQLFrom (α : List Field)
   | join         : SQLJoin → SQLFrom α → SQLFrom α → SQLProp → SQLFrom α
   | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
 
-inductive SQLQuery {β : List Field} (α : List Field) where
-  | mk : SQLSelect α → SQLFrom β → SQLProp → SQLQuery α
+def Field.interp : Field → Type
+  | nat _ => Nat
+  | varchar n _ => Varchar n
+  | char _ => Char
+  | date _ => Date
+  | nil _ => String
 
-inductive PGQuery {β : List Field} (α : List Field) where
-  | simple : SQLQuery α → PGQuery α
-  | nested : SQLSelect α → SQLQuery β → SQLProp → PGQuery α
+inductive Table : List Field → Type
+  | nil : Table []
+  | cons (x : u.interp) (xs : Table us) : Table (u :: us)
+
+inductive TaggedField where
+  | nat : String → Nat → TaggedField
+  | varchar : String → Varchar n → TaggedField
+
+def Table.of {us: List Field} (_ : Table us) : List Field := us
+
+inductive SQLQuery : Type → Type (u + 1) where
+  | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
+  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
 
 def SQLSelectField.toString : SQLSelectField → String
   | col   c   => c
@@ -127,7 +142,8 @@ def SQLFrom.toString : SQLFrom α → String
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
-def SQLQuery.toString : @SQLQuery β α → String
-  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
+def SQLQuery.toString : SQLQuery α → String
+  | mk s f w _ => s!"SELECT {s} FROM {f} WHERE {w}"
+  | nstd s q w _ => s!"SELECT {s} FROM ({q.toString}) WHERE {w}"
 
-instance : ToString (@SQLQuery β α) := ⟨SQLQuery.toString⟩
+instance : ToString (SQLQuery α) := ⟨SQLQuery.toString⟩

@@ -217,9 +217,9 @@ def elabJoin : Syntax → TermElabM Expr
 partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|$t:ident)               => do
     let ctx ← get
-    let app ← whnf (mkApp ctx (mkStrOfIdent t))
-    set app
-    pure <| mkApp2 (mkConst `SQLFrom.table) app (mkStrOfIdent t)
+    let typ ← whnf (mkApp ctx (mkStrOfIdent t))
+    set typ
+    pure <| mkApp2 (mkConst `SQLFrom.table) typ (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
     mkAppM `SQLFrom.alias #[← elabFrom f, mkStrOfIdent t]
   | `(sqlFrom|$t₁:sqlFrom, $t₂:sqlFrom) => do mkAppM `SQLFrom.implicitJoin #[← elabFrom t₁, ← elabFrom t₂]
@@ -228,7 +228,7 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
 
-partial def elabQuery : TSyntax `query → SchemaTermElabM (Expr × Expr)
+partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
   | `(query| SELECT $sel FROM $frm:sqlFrom $[WHERE $prp]?) => do
     let whr ← match prp with
       | none     => elabConst `SQLProp.tt
@@ -237,19 +237,22 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM (Expr × Expr)
     let (frm, ftyp) ← (elabFrom frm).run ctx
     set ftyp
     let (sel, styp) ← (elabSelect sel).run (← get)
-    let query := mkApp5 (mkConst `SQLQuery.mk) ftyp styp sel frm whr
-    -- TODO why does this need 4 args not 3??
-    let pgquery := mkApp4 (mkConst `PGQuery.simple) ftyp styp ftyp query
-    set query
-    pure (pgquery, styp)
+    let expr := mkApp4 (mkConst `SQLQuery.mk [1]) styp ftyp sel frm
+    let query ← elabAppArgs expr #[] #[Arg.expr whr] .none (explicit := false) (ellipsis := false)
+    set styp
+    pure query
   | `(query| SELECT $sel FROM ($query:query) $[WHERE $prp]?) => do
    let whr ← match prp with
       | none     => elabConst `SQLProp.tt
       | some prp => elabProp prp
     let ctx ← get
-    let ((qry, qtyp), rawQry) ← (elabQuery query).run ctx
-    let (sel, styp) ← (elabSelect sel).run qtyp
-    pure <| (mkApp6 (mkConst `PGQuery.nested) styp qtyp styp sel rawQry whr, qtyp)
+    let (qry, qtyp) ← (elabQuery query).run ctx
+    set qtyp
+    let (sel, styp) ← (elabSelect sel).run (← get)
+    set styp
+    let expr := mkApp4 (mkConst `SQLQuery.nstd [1]) styp qtyp sel qry
+    let query ← elabAppArgs expr #[] #[Arg.expr whr] .none (explicit := false) (ellipsis := false)
+    pure query
   | _ => throwUnsupportedSyntax
 
 @[term_elab pgquery] def elabPQQuery : TermElab := fun stx _ =>
@@ -258,7 +261,7 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM (Expr × Expr)
     let env ← getEnv
     if let .some s := env.find? schema.getId then
       let (query, _) ← (elabQuery query).run s.value!
-      pure query.fst
+      pure query
     else
       throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
@@ -268,8 +271,6 @@ def schema (table : String) : List Field := match table with
   | "otherTable" => [Field.date "date"]
   | _ => []
 
-def x := queryOn QuerySyntax.schema | SELECT id, name FROM myTable
-def y := x
+def z := queryOn QuerySyntax.schema | SELECT * FROM (SELECT id FROM (SELECT * FROM myTable))
 
--- TODO outer type must be limited to inner type in respect to '*'
-def z := queryOn QuerySyntax.schema | SELECT * FROM ( SELECT id, name FROM myTable )
+#eval z.toString

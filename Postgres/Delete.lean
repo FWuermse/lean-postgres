@@ -1,5 +1,5 @@
 import Postgres.LibPQ
-import Postgres.Untyped.DeleteDSL
+import Postgres.Schema.DeleteDSL
 
 open LibPQ Connection DeleteDSL
 

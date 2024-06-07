@@ -5,13 +5,13 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Untyped.QueryDSL
+import Postgres.Schema.QueryDSL
 
 open LibPQ Connection
 
 namespace Query
 
-def sendQuery (connection : Connection) (query : SQLQuery) : IO <| Option <| List <| List String := do
+def sendQuery (connection : Connection) (query : SQLQuery α) : IO <| Option <| List <| List String := do
   let res ← exec connection query.toString
   if res.status != .tuplesOk then
     let error ← connection.error

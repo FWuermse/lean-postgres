@@ -8,4 +8,3 @@ import Postgres.Insert
 import Postgres.Schema
 import Postgres.LibPQ
 import Postgres.DDL
-import Postgres.Untyped

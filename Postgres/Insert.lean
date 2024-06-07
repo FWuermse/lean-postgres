@@ -1,5 +1,5 @@
 import Postgres.LibPQ
-import Postgres.Untyped.InsertDSL
+import Postgres.Schema.InsertDSL
 
 open LibPQ Connection InsertDSL
 

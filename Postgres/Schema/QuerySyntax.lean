@@ -59,12 +59,13 @@ syntax " LEFT "  : join
 syntax " RIGHT " : join
 syntax " OUTER " : join
 
-declare_syntax_cat                                 sqlFrom
-syntax ident                                     : sqlFrom
-syntax sqlFrom ", " sqlFrom                      : sqlFrom
-syntax sqlFrom " AS " ident                      : sqlFrom
-syntax sqlFrom join " JOIN " sqlFrom " ON " prop : sqlFrom
-syntax "(" sqlFrom ")"                           : sqlFrom
+declare_syntax_cat                                      sqlFrom
+syntax ident                                          : sqlFrom
+syntax sqlFrom ", " sqlFrom                           : sqlFrom
+syntax sqlFrom " AS " ident                           : sqlFrom
+syntax sqlFrom join " JOIN " sqlFrom " ON " prop      : sqlFrom
+syntax sqlFrom join " JOIN " sqlFrom " USING " parsId : sqlFrom
+syntax "(" sqlFrom ")"                                : sqlFrom
 
 declare_syntax_cat                                                      query
 syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)?         : query
@@ -78,25 +79,24 @@ def mkStrOfIdent (id : Syntax) : Expr :=
 abbrev SchemaTermElabM := StateRefT Expr TermElabM
 
 def exprToField : Expr → SchemaTermElabM Field
-  | Expr.app ctor (Expr.lit $ Literal.strVal s) =>
-    let res := match ctor with
-      | (Expr.const `Field.nat _) => (Field.nat s)
-      | (Expr.app (Expr.const `Field.varchar _) (Expr.lit $ Literal.natVal n)) => (Field.varchar n.toUInt8 s)
-      | (Expr.const `Field.char _) => (Field.char s)
-      | (Expr.const `Field.date _) => (Field.date s)
-      | (Expr.const `Field.nil _) => (Field.nil s)
-      | _ => Field.nil ""
-    return res
-  | _ =>
-    return Field.nil ""
+  | Expr.app ctor (Expr.lit <| Literal.strVal s) => match ctor with
+      | (Expr.const `Field.nat _) => pure (Field.nat s)
+      | Expr.app (Expr.const `Field.varchar _) numExpr => do
+        if let .some nat ← getNatValue? numExpr then
+          if nat > 255 then
+            throwError s!"The maximum value for Varchar is 255, failure on {numExpr} with value {nat}"
+          pure (Field.varchar nat s)
+        else throwError s!"Unsupported Length param for Varchar {numExpr}"
+      | (Expr.const `Field.char _) => pure (Field.char s)
+      | (Expr.const `Field.date _) => pure (Field.date s)
+      | e => throwError s!"Unsupported Field of type: {e}"
+  | _ => throwUnsupportedSyntax
 
 def elabField : Field → SchemaTermElabM Expr
   | Field.nat s => pure <| mkApp (mkConst `Field.nat) (mkStrLit s)
-  | Field.varchar n s => pure <| mkApp2 (mkConst `Field.varchar) (mkNatLit n.toNat) (mkStrLit s)
+  | Field.varchar n s => pure <| mkApp2 (mkConst `Field.varchar) (mkNatLit n) (mkStrLit s)
   | Field.char s => pure <| mkApp (mkConst `Field.char) (mkStrLit s)
   | Field.date s => pure <| mkApp (mkConst `Field.date) (mkStrLit s)
-  | Field.nil s => pure <| mkApp (mkConst `Field.nil) (mkStrLit s)
-
 
 partial def elabStrOfParsId : Syntax → TermElabM Expr
   | `(parsId|$id:ident)      => pure $ mkStrOfIdent id
@@ -221,10 +221,25 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
     set typ
     pure <| mkApp2 (mkConst `SQLFrom.table) typ (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
-    mkAppM `SQLFrom.alias #[← elabFrom f, mkStrOfIdent t]
-  | `(sqlFrom|$t₁:sqlFrom, $t₂:sqlFrom) => do mkAppM `SQLFrom.implicitJoin #[← elabFrom t₁, ← elabFrom t₂]
+    let frm ← elabFrom f
+    pure <| mkApp3 (mkConst `SQLFrom.alias) (← get) (frm) (mkStrOfIdent t)
+  | `(sqlFrom|$t₁:sqlFrom, $t₂:sqlFrom) => do
+    /- TODO:
+      Same as below but ugly because:
+        Prop requires From α and then From α must be updated to From α' on Prop comparison.
+        Ugly
+        Further note: How do I know which part of prop is the join cond?
+    -/
+    mkAppM `SQLFrom.implicitJoin #[← elabFrom t₁, ← elabFrom t₂]
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:prop) => do
+    /- TODO:
+      + Merge Tyes
+      + Discard JoinOn Field
+        + Identify by first . suffix in respect to aliases
+    -/
     mkAppM `SQLFrom.join #[← elabJoin j, ← elabFrom l, ← elabFrom r, ← elabProp p]
+  | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom USING $p:parsId) => do
+    throwUnsupportedSyntax
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
 
@@ -237,9 +252,9 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
     let (frm, ftyp) ← (elabFrom frm).run ctx
     set ftyp
     let (sel, styp) ← (elabSelect sel).run (← get)
+    set styp
     let expr := mkApp4 (mkConst `SQLQuery.mk [1]) styp ftyp sel frm
     let query ← elabAppArgs expr #[] #[Arg.expr whr] .none (explicit := false) (ellipsis := false)
-    set styp
     pure query
   | `(query| SELECT $sel FROM ($query:query) $[WHERE $prp]?) => do
    let whr ← match prp with
@@ -257,7 +272,7 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
 
 @[term_elab pgquery] def elabPQQuery : TermElab := fun stx _ =>
   match stx with
-  | `(pgquery| queryOn $schema | $query) => withAutoBoundImplicit do
+  | `(pgquery| queryOn $schema | $query) => do
     let env ← getEnv
     if let .some s := env.find? schema.getId then
       let (query, _) ← (elabQuery query).run s.value!
@@ -266,11 +281,19 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
       throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
 
-def schema (table : String) : List Field := match table with
+def schema : String → List Field
   | "myTable" => [Field.nat "id", Field.nat "name"]
   | "otherTable" => [Field.date "date"]
   | _ => []
 
 def z := queryOn QuerySyntax.schema | SELECT * FROM (SELECT id FROM (SELECT * FROM myTable))
 
-#eval z.toString
+def s : String → List Field
+  | "information_schema.tables" => [Field.varchar 255 "table_name", Field.nat "dummy"]
+  | _ => []
+
+def query := queryOn QuerySyntax.s |
+  SELECT table_name
+  FROM information_schema.tables AS hi
+  WHERE table_schema = "public"
+    AND table_type = "BASE TABLE"

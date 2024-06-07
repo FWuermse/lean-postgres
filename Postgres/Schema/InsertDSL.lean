@@ -7,8 +7,8 @@ class ToByteArray (α : Type u) where
 
 export ToByteArray (toByteArray)
 
-inductive Varchar (i : UInt8) where
-  | mk : (s: String) → (h : s.length <= i.toNat := by decide) → Varchar i
+inductive Varchar (n : Nat) where
+  | mk : (s: String) → (h : s.length <= n := by decide) → Varchar n
 
 instance : ToString (Varchar i) where
   toString vc := match vc with
@@ -24,7 +24,7 @@ instance : ToString Date where
 inductive Univ
   | nat
   | char
-  | varchar (n : UInt8)
+  | varchar (n : Nat)
   | date
 
 def Univ.interp : Univ → Type

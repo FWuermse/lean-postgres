@@ -9,10 +9,9 @@ import Postgres.Schema.InsertDSL
 
 inductive Field
   | nat : String → Field
-  | varchar (n : UInt8) : String → Field
+  | varchar (n : Nat) : String → Field
   | char : String → Field
   | date : String → Field
-  | nil  : String → Field
   deriving BEq, Repr
 
 def Field.ToString : Field → String
@@ -20,14 +19,12 @@ def Field.ToString : Field → String
   | varchar n s => s!"Varchar {n} {s}"
   | char s => s!"Char {s}"
   | date s => s!"Date {s}"
-  | nil s => s!"Nil {s}"
 
 def Field.getName : Field → String
   | nat s => s
   | varchar _ s => s
   | char s => s
   | date s => s
-  | nil s => s
 
 instance : ToString Field :=
   ⟨Field.ToString⟩
@@ -39,6 +36,10 @@ inductive SQLSelectField
 inductive SQLSelect (α : List Field)
   | list : Bool → List SQLSelectField → SQLSelect α
   | all  : Bool → SQLSelect α
+
+inductive RawSQLSelect
+  | list : Bool → List SQLSelectField → RawSQLSelect
+  | all  : Bool → RawSQLSelect
 
 inductive SQLProp
   | tt : SQLProp
@@ -62,33 +63,36 @@ inductive SQLProp
 inductive SQLJoin
   | inner | left | right | outer
 
--- TODO: Condition proofs for joins?
 inductive SQLFrom (α : List Field)
   | table        : String  → SQLFrom α
   | alias        : SQLFrom α → String  → SQLFrom α
   | join         : SQLJoin → SQLFrom α → SQLFrom α → SQLProp → SQLFrom α
+  | joinUsing    : SQLJoin → SQLFrom α → SQLFrom α → DataEntry → SQLFrom α
   | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
+
+inductive RawSQLFrom
+  | table        : String  → RawSQLFrom
+  | alias        : RawSQLFrom → String  → RawSQLFrom
+  | join         : SQLJoin → RawSQLFrom → RawSQLFrom → SQLProp → RawSQLFrom
+  | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
 
 def Field.interp : Field → Type
   | nat _ => Nat
   | varchar n _ => Varchar n
   | char _ => Char
   | date _ => Date
-  | nil _ => String
 
 inductive Table : List Field → Type
   | nil : Table []
   | cons (x : u.interp) (xs : Table us) : Table (u :: us)
 
-inductive TaggedField where
-  | nat : String → Nat → TaggedField
-  | varchar : String → Varchar n → TaggedField
-
-def Table.of {us: List Field} (_ : Table us) : List Field := us
-
 inductive SQLQuery : Type → Type (u + 1) where
   | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
   | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
+
+inductive RawSQLQuery where
+  | mk : RawSQLSelect → RawSQLFrom → SQLProp → RawSQLQuery
+  | nstd : RawSQLSelect → RawSQLQuery → SQLProp → RawSQLQuery
 
 def SQLSelectField.toString : SQLSelectField → String
   | col   c   => c
@@ -136,8 +140,9 @@ instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
 def SQLFrom.toString : SQLFrom α → String
   | table s            => s
-  | .alias f s          => s!"({f.toString}) AS {s}"
-  | join  j l r p      => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
+  | .alias f s         => s!"({f.toString}) AS {s}"
+  | join j l r p       => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
+  | joinUsing j l r d  => s!"{l.toString} {j} JOIN {r.toString} USING {d}"
   | implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩

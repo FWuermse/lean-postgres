@@ -63,19 +63,6 @@ inductive SQLProp
 inductive SQLJoin
   | inner | left | right | outer
 
-inductive SQLFrom (α : List Field)
-  | table        : String  → SQLFrom α
-  | alias        : SQLFrom α → String  → SQLFrom α
-  | join         : SQLJoin → SQLFrom α → SQLFrom α → SQLProp → SQLFrom α
-  | joinUsing    : SQLJoin → SQLFrom α → SQLFrom α → DataEntry → SQLFrom α
-  | implicitJoin : SQLFrom α → SQLFrom α → SQLFrom α
-
-inductive RawSQLFrom
-  | table        : String  → RawSQLFrom
-  | alias        : RawSQLFrom → String  → RawSQLFrom
-  | join         : SQLJoin → RawSQLFrom → RawSQLFrom → SQLProp → RawSQLFrom
-  | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
-
 def Field.interp : Field → Type
   | nat _ => Nat
   | varchar n _ => Varchar n
@@ -86,9 +73,24 @@ inductive Table : List Field → Type
   | nil : Table []
   | cons (x : u.interp) (xs : Table us) : Table (u :: us)
 
+def Table.of {us: List Field} (_ : Table us) : List Field := us
+
+inductive SQLFrom : Type → Type (u + 1) where
+  | table        : String  → SQLFrom (Table α)
+  | alias        : SQLFrom (Table α) → String  → SQLFrom (Table α)
+  | join         : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → SQLProp → SQLFrom (Table γ)
+  | joinUsing    : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → DataEntry → SQLFrom (Table γ)
+  | implicitJoin : SQLFrom (Table α) → SQLFrom (Table β) → SQLFrom (Table γ)
+
+inductive RawSQLFrom
+  | table        : String  → RawSQLFrom
+  | alias        : RawSQLFrom → String  → RawSQLFrom
+  | join         : SQLJoin → RawSQLFrom → RawSQLFrom → SQLProp → RawSQLFrom
+  | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
+
 inductive SQLQuery : Type → Type (u + 1) where
-  | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
-  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery <| Table α
+  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery (Table α)
+  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery (Table α)
 
 inductive RawSQLQuery where
   | mk : RawSQLSelect → RawSQLFrom → SQLProp → RawSQLQuery

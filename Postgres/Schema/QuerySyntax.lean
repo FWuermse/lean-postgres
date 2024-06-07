@@ -70,6 +70,7 @@ syntax "(" sqlFrom ")"                                : sqlFrom
 declare_syntax_cat                                                      query
 syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)?         : query
 syntax "SELECT " sqlSelect " FROM " "(" query ")" (" WHERE " prop)?   : query
+syntax "SELECT " sqlSelect " FROM " "(" ident ")" (" WHERE " prop)?   : query
 
 syntax (name := pgquery) "queryOn" ident " | " query : term
 
@@ -120,16 +121,22 @@ def elabProjType (cols : List (TSyntax `selectField)): SchemaTermElabM Expr := d
   let mut selType : List Field := []
     if let .some exprs := expr.listLit? then
       let exprs ← exprs.snd.mapM exprToField
+      if cols.isEmpty then
+        throwError s!"Cannot select from an empty Table"
       for typ in cols do
         match typ with
           | `(selectField|$c:parsId) => do
             let id := parsIdToString c
             if let .some field := exprs.find? (fun f => f.getName == id) then
               selType := selType.append [field]
+            else
+              throwError s!"Cannot select Field {id} from Table {exprs}"
           | `(selectField|$c:parsId AS $_) => do
             let id := parsIdToString c
             if let .some field := exprs.find? (fun f => f.getName == id) then
               selType := selType.append [field]
+            else
+              throwError s!"Cannot select Field {id} from Table {exprs}"
           | _ => throwUnsupportedSyntax
     else
       throwUnsupportedSyntax
@@ -219,26 +226,44 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
     let ctx ← get
     let typ ← whnf (mkApp ctx (mkStrOfIdent t))
     set typ
-    pure <| mkApp2 (mkConst `SQLFrom.table) typ (mkStrOfIdent t)
+    pure <| mkApp2 (mkConst `SQLFrom.table [1]) typ (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
     let frm ← elabFrom f
-    pure <| mkApp3 (mkConst `SQLFrom.alias) (← get) (frm) (mkStrOfIdent t)
-  | `(sqlFrom|$t₁:sqlFrom, $t₂:sqlFrom) => do
-    /- TODO:
-      Same as below but ugly because:
-        Prop requires From α and then From α must be updated to From α' on Prop comparison.
-        Ugly
-        Further note: How do I know which part of prop is the join cond?
-    -/
-    mkAppM `SQLFrom.implicitJoin #[← elabFrom t₁, ← elabFrom t₂]
+    pure <| mkApp3 (mkConst `SQLFrom.alias [1]) (← get) (frm) (mkStrOfIdent t)
+  | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
+    let (lfrm, ltyp) ← (elabFrom l).run (← get)
+    let rfrm ← elabFrom r
+    let rtyp ← get
+    if let .some rtyps := rtyp.listLit? then
+      if let .some ltyps := ltyp.listLit? then
+        let rfields ← rtyps.snd.mapM exprToField
+        let lfields ← ltyps.snd.mapM exprToField
+        let typ ← (rfields.append lfields).mapM elabField
+        let typ ← mkListLit (mkConst `Field) typ
+        set typ
+        pure <| mkApp2 (mkApp3 (mkConst `SQLFrom.implicitJoin [1]) ltyp rtyp typ) lfrm rfrm
+      else
+        throwUnsupportedSyntax
+    else
+      throwUnsupportedSyntax
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:prop) => do
-    /- TODO:
-      + Merge Tyes
-      + Discard JoinOn Field
-        + Identify by first . suffix in respect to aliases
-    -/
-    mkAppM `SQLFrom.join #[← elabJoin j, ← elabFrom l, ← elabFrom r, ← elabProp p]
+    let (lfrm, ltyp) ← (elabFrom l).run (← get)
+    let rfrm ← elabFrom r
+    let rtyp ← get
+    if let .some rtyps := rtyp.listLit? then
+      if let .some ltyps := ltyp.listLit? then
+        let rfields ← rtyps.snd.mapM exprToField
+        let lfields ← ltyps.snd.mapM exprToField
+        let typ ← (rfields.append lfields).mapM elabField
+        let typ ← mkListLit (mkConst `Field) typ
+        set typ
+        pure <| mkApp4 (mkApp3 (mkConst `SQLFrom.join [1]) ltyp rtyp typ) (← elabJoin j) lfrm rfrm (← elabProp p)
+      else
+        throwUnsupportedSyntax
+    else
+      throwUnsupportedSyntax
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom USING $p:parsId) => do
+    IO.println "TODO"
     throwUnsupportedSyntax
   | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | _                                 => throwUnsupportedSyntax
@@ -268,6 +293,9 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
     let expr := mkApp4 (mkConst `SQLQuery.nstd [1]) styp qtyp sel qry
     let query ← elabAppArgs expr #[] #[Arg.expr whr] .none (explicit := false) (ellipsis := false)
     pure query
+  | `(query| SELECT $sel FROM ($id:ident) $[WHERE $prp]?) => do
+    IO.println "TODO"
+    throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
 
 @[term_elab pgquery] def elabPQQuery : TermElab := fun stx _ =>
@@ -283,10 +311,20 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
 
 def schema : String → List Field
   | "myTable" => [Field.nat "id", Field.nat "name"]
-  | "otherTable" => [Field.date "date"]
+  | "otherTable" => [Field.nat "id", Field.date "date"]
   | _ => []
 
-def z := queryOn QuerySyntax.schema | SELECT * FROM (SELECT id FROM (SELECT * FROM myTable))
+def nested := queryOn QuerySyntax.schema |
+  SELECT *
+  FROM (SELECT id
+        FROM (SELECT *
+              FROM myTable))
+def join := queryOn QuerySyntax.schema | SELECT name, date FROM myTable INNER JOIN otherTable ON myTable.id = otherTable.id
+def implicitJoin := queryOn QuerySyntax.schema |
+  SELECT name AS nm, date
+  FROM myTable, otherTable
+  WHERE myTable.id = otherTable.id
+--def empty := queryOn QuerySyntax.schema | SELECT a FROM myTable
 
 def s : String → List Field
   | "information_schema.tables" => [Field.varchar 255 "table_name", Field.nat "dummy"]
@@ -294,6 +332,6 @@ def s : String → List Field
 
 def query := queryOn QuerySyntax.s |
   SELECT table_name
-  FROM information_schema.tables AS hi
+  FROM information_schema.tables
   WHERE table_schema = "public"
     AND table_type = "BASE TABLE"

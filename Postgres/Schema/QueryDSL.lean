@@ -26,6 +26,12 @@ def Field.getName : Field → String
   | char s => s
   | date s => s
 
+def Field.setName : Field → String → Field
+  | nat _, new => nat new
+  | varchar n _, new => varchar n new
+  | char _, new => char new
+  | date _, new => date new
+
 instance : ToString Field :=
   ⟨Field.ToString⟩
 
@@ -89,8 +95,8 @@ inductive RawSQLFrom
   | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
 
 inductive SQLQuery : Type → Type (u + 1) where
-  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery (Table α)
-  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → (h: α ⊆ β := by simp) → SQLQuery (Table α)
+  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → SQLQuery (Table α)
+  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → SQLQuery (Table α)
 
 inductive RawSQLQuery where
   | mk : RawSQLSelect → RawSQLFrom → SQLProp → RawSQLQuery
@@ -150,7 +156,7 @@ def SQLFrom.toString : SQLFrom α → String
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
 def SQLQuery.toString : SQLQuery α → String
-  | mk s f w _ => s!"SELECT {s} FROM {f} WHERE {w}"
-  | nstd s q w _ => s!"SELECT {s} FROM ({q.toString}) WHERE {w}"
+  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
+  | nstd s q w => s!"SELECT {s} FROM ({q.toString}) WHERE {w}"
 
 instance : ToString (SQLQuery α) := ⟨SQLQuery.toString⟩

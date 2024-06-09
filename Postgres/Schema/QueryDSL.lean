@@ -12,7 +12,7 @@ inductive Field
   | varchar (n : Nat) : String → Field
   | char : String → Field
   | date : String → Field
-  deriving BEq, Repr
+  deriving BEq, Repr, Hashable
 
 def Field.ToString : Field → String
   | nat s => s!"Nat {s}"
@@ -81,22 +81,24 @@ inductive Table : List Field → Type
 
 def Table.of {us: List Field} (_ : Table us) : List Field := us
 
+mutual
 inductive SQLFrom : Type → Type (u + 1) where
-  | table        : String  → SQLFrom (Table α)
+  | table        : String → SQLFrom (Table α)
   | alias        : SQLFrom (Table α) → String  → SQLFrom (Table α)
   | join         : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → SQLProp → SQLFrom (Table γ)
   | joinUsing    : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → DataEntry → SQLFrom (Table γ)
   | implicitJoin : SQLFrom (Table α) → SQLFrom (Table β) → SQLFrom (Table γ)
+  | nestedJoin   : SQLQuery (Table α) → SQLFrom (Table α)
+
+inductive SQLQuery : Type → Type (u + 1) where
+  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → SQLQuery (Table α)
+end
 
 inductive RawSQLFrom
   | table        : String  → RawSQLFrom
   | alias        : RawSQLFrom → String  → RawSQLFrom
   | join         : SQLJoin → RawSQLFrom → RawSQLFrom → SQLProp → RawSQLFrom
   | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
-
-inductive SQLQuery : Type → Type (u + 1) where
-  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → SQLQuery (Table α)
-  | nstd : SQLSelect α → SQLQuery (Table β) → SQLProp → SQLQuery (Table α)
 
 inductive RawSQLQuery where
   | mk : RawSQLSelect → RawSQLFrom → SQLProp → RawSQLQuery
@@ -146,17 +148,19 @@ def SQLJoin.toString : SQLJoin → String
 
 instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
+mutual
 def SQLFrom.toString : SQLFrom α → String
-  | table s            => s
-  | .alias f s         => s!"({f.toString}) AS {s}"
-  | join j l r p       => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
-  | joinUsing j l r d  => s!"{l.toString} {j} JOIN {r.toString} USING {d}"
-  | implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
-
-instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
+  | SQLFrom.table s            => s
+  | SQLFrom.alias f s         => s!"({f.toString}) AS {s}"
+  | SQLFrom.join j l r p       => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
+  | SQLFrom.joinUsing j l r d  => s!"{l.toString} {j} JOIN {r.toString} USING {d}"
+  | SQLFrom.implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
+  | SQLFrom.nestedJoin q       => q.toString
 
 def SQLQuery.toString : SQLQuery α → String
-  | mk s f w => s!"SELECT {s} FROM {f} WHERE {w}"
-  | nstd s q w => s!"SELECT {s} FROM ({q.toString}) WHERE {w}"
+  | SQLQuery.mk s f w => s!"SELECT {s} FROM {f.toString} WHERE {w}"
+end
+
+instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩
 
 instance : ToString (SQLQuery α) := ⟨SQLQuery.toString⟩

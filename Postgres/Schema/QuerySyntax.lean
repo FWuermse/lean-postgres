@@ -89,24 +89,21 @@ def QueryState.toString : QueryState → String
 instance : ToString QueryState :=
   ⟨QueryState.toString⟩
 
+-- TODO: is reader sufficient
 abbrev SchemaTermElabM := StateRefT QueryState TermElabM
 
 def exprToField : Expr → SchemaTermElabM Field
-  | Expr.app ctor (Expr.lit <| Literal.strVal s) => do
-    let state ← get
-    let mut fieldName := s
-    if let .some tableName := state.tag then
-      fieldName := s!"{tableName}.{fieldName}"
+  | Expr.app ctor (Expr.lit <| Literal.strVal s) =>
     match ctor with
-      | Expr.const `Field.nat _ => pure (Field.nat fieldName)
-      | Expr.app (Expr.const `Field.varchar _) numExpr =>
+      | Expr.const `Field.nat _ => pure (Field.nat s)
+      | Expr.app (Expr.const `Field.varchar _) numExpr => do
         if let .some nat ← getNatValue? numExpr then
           if nat > 255 then
             throwError "The maximum value for Varchar is 255, failure on {numExpr} with value {nat}"
-          pure (Field.varchar nat fieldName)
+          pure (Field.varchar nat s)
         else throwError s!"Unsupported Length param for Varchar {numExpr}"
-      | Expr.const `Field.char _ => pure (Field.char fieldName)
-      | Expr.const `Field.date _ => pure (Field.date fieldName)
+      | Expr.const `Field.char _ => pure (Field.char s)
+      | Expr.const `Field.date _ => pure (Field.date s)
       | e => throwError s!"Unsupported Field of type: {e}"
   | _ => throwUnsupportedSyntax
 
@@ -144,14 +141,14 @@ def findFieldsInTable : List Field → String → SchemaTermElabM (List Field) :
         -- get! 0 is safe because of the invariant: length > 1 ∧ splitAt length-1 with 0 has sfx length 1, splitAt length-1 with n+1 has unchanged suffix.
         | some v => v.fold (fun l s => l ++ table.filter (fun f : Field => f.getName == s!"{s}.{sfx.get! 0}")) []
         | none => []
-      let direct : List Field := match table.filter (fun f => f.getName == sfx.get! 0 || f.getName == id) with
+      let direct : List Field := match table.filter (fun f => (f.getName.splitOn ".").getLast! == sfx.get! 0 || f.getName == id) with
         | [] => aliases
         | l => l
       pure direct
     else
       let direct : List Field := match table.find? (fun f => f.getName == id) with
         | some v => [v]
-        | none => table.filter (fun f => (f.getName.splitOn ".").last' == id)
+        | none => table.filter (fun f => (f.getName.splitOn ".").getLast! == id)
       pure direct
 
 def elabProjType (cols : List (TSyntax `selectField)): SchemaTermElabM Expr := do
@@ -166,14 +163,14 @@ def elabProjType (cols : List (TSyntax `selectField)): SchemaTermElabM Expr := d
         | `(selectField|$c:parsId) => do
           let id := parsIdToString c
           let selId := (← findFieldsInTable exprs id)
-          selType := selType.append selId
+          selType := selType ++ selId
           if selId.isEmpty then
             throwError s!"Cannot select Field {id} from Table {exprs}"
         | `(selectField|$c:parsId AS $a:ident) => do
           let id := parsIdToString c
           let al := a.getId.toString
-          let selId := (← findFieldsInTable exprs id).map (Field.setName . al)
-          selType := selType.append selId
+          let selId := (← findFieldsInTable exprs id) --.map (Field.setName . al)
+          selType := selType ++ selId
           if selId.isEmpty then
             throwError s!"Cannot select Field {id} from Table {exprs}"
         | _ => throwUnsupportedSyntax
@@ -260,63 +257,73 @@ def elabJoin : TSyntax `join → TermElabM Expr
   | `(join|OUTER) => elabConst `SQLJoin.outer
   | _             => throwUnsupportedSyntax
 
-def tagFromList : QueryState → SchemaTermElabM (List Field) := fun s => do
-  if let .some styp := s.expr.listLit? then
-    let state ← get
-    set { state with tag := s.tag }
+def getListFromExpr : Expr → SchemaTermElabM (List Field) := fun x => do
+  if let .some styp := x.listLit? then
     styp.snd.mapM exprToField
   else
     throwUnsupportedSyntax
 
+def tagFromList : SchemaTermElabM Unit := do
+  let state ← get
+  let list ← getListFromExpr state.expr
+  let tagged := match state.tag with
+    | some t => list.map fun f => Field.setName f s!"{t}.{f.getName}"
+    | none => list
+  let typ ← mkListLit (mkConst `Field) (← tagged.mapM elabField)
+  set { state with expr := typ, tag := .none }
+
 def concatFrom : QueryState → QueryState → SchemaTermElabM Expr :=
   fun l r => do
-    let lfields ← tagFromList l
-    let rfields ← tagFromList r
-    let typ ← (rfields.append lfields).mapM elabField
+    let lfields ← getListFromExpr l.expr
+    let rfields ← getListFromExpr r.expr
+    let typ ← (lfields ++ rfields).mapM elabField
     let typ ← mkListLit (mkConst `Field) typ
     let state ← get
     set { state with expr := typ, tag := .none }
     pure typ
 
-def merge : α → β → β → β :=
-  fun _ _ c => c
-
 mutual
 partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
   | `(sqlFrom|$t:ident)               => do
+    let tableName := t.getId.toString
     let state ← get
+    -- Get List from Schema
     let typ ← whnf (mkApp state.expr (mkStrOfIdent t))
-    set { state with expr := typ, tag := t.getId.toString, tables := state.tables.insert t.getId.toString }
-    pure <| mkApp2 (mkConst `SQLFrom.table [1]) typ (mkStrOfIdent t)
+    -- Set State for Tagging
+    set { state with expr := typ, tag := tableName, tables := state.tables.insert tableName }
+    -- Remove
+    let _ ← tagFromList
+    pure <| mkApp2 (mkConst `SQLFrom.table) (← get).expr (mkStrOfIdent t)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
     let frm ← elabFrom f
     let state ← get
     set { state with as := state.as.insert t.getId.toString state.tables }
-    pure <| mkApp3 (mkConst `SQLFrom.alias [1]) (← get).expr (frm) (mkStrOfIdent t)
+    pure <| mkApp3 (mkConst `SQLFrom.alias) (← get).expr (frm) (mkStrOfIdent t)
   | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
-    let (lfrm, ltyp) ← (elabFrom l).run (← get)
+    let elabFromFun := (elabFrom l).run
+    let (lfrm, ltyp) ← elabFromFun (← get)
     let rfrm ← elabFrom r
     let rtyp ← get
     let typ ← concatFrom ltyp rtyp
-    pure <| mkApp2 (mkApp3 (mkConst `SQLFrom.implicitJoin [1]) ltyp.expr rtyp.expr typ) lfrm rfrm
+    elabAppArgs (mkApp3 (mkConst `SQLFrom.implicitJoin) ltyp.expr rtyp.expr typ) #[] #[Arg.expr lfrm, Arg.expr rfrm] .none (explicit := false) (ellipsis := false)
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:prop) => do
     let (lfrm, lstate) ← (elabFrom l).run (← get)
     let rfrm ← elabFrom r
     let rstate ← get
     let typ ← concatFrom lstate rstate
     set { ← get with tables := lstate.tables.merge rstate.tables, as := lstate.as.mergeWith (fun _ _ b => b) rstate.as}
-    pure <| mkApp4 (mkApp3 (mkConst `SQLFrom.join [1]) lstate.expr rstate.expr typ) (← elabJoin j) lfrm rfrm (← elabProp p)
+    elabAppArgs (mkApp3 (mkConst `SQLFrom.join) lstate.expr rstate.expr typ) #[] #[Arg.expr (← elabJoin j), Arg.expr lfrm, Arg.expr rfrm, Arg.expr (← elabProp p)] .none (explicit := false) (ellipsis := false)
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom USING $p:parsId) => do
     let (lfrm, ltyp) ← (elabFrom l).run (← get)
     let rfrm ← elabFrom r
     let rtyp ← get
     let typ ← concatFrom ltyp rtyp
-    pure <| mkApp4 (mkApp3 (mkConst `SQLFrom.joinUsing [1]) ltyp.expr rtyp.expr typ) (← elabJoin j) lfrm rfrm (← elabStrOfParsId p)
+    pure <| mkApp4 (mkApp3 (mkConst `SQLFrom.joinUsing) ltyp.expr rtyp.expr typ) (← elabJoin j) lfrm rfrm (← elabStrOfParsId p)
   | `(sqlFrom|($f:sqlFrom))           => do
     elabFrom f
   | `(sqlFrom| ($query:query)) => do
     let qry ← elabQuery query
-    pure <| mkApp2 (mkConst `SQLFrom.nestedJoin [1]) (← get).expr qry
+    pure <| mkApp2 (mkConst `SQLFrom.nestedJoin) (← get).expr qry
   | _                                 => throwUnsupportedSyntax
 
 partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
@@ -330,22 +337,24 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
     set ftyp
     let (sel, styp) ← (elabSelect sel).run (← get)
     set styp
-    let expr := mkApp4 (mkConst `SQLQuery.mk [1]) styp.expr ftyp.expr sel frm
+    let expr := mkApp4 (mkConst `SQLQuery.mk) styp.expr ftyp.expr sel frm
     let query ← elabAppArgs expr #[] #[Arg.expr whr] .none (explicit := false) (ellipsis := false)
     pure query
   | _ => throwUnsupportedSyntax
 end
 
-@[term_elab pgquery] def elabPQQuery : TermElab := fun stx _ =>
-  match stx with
+-- TODO: check elab_rules
+elab_rules : term
   | `(pgquery| queryOn $schema | $query) => do
     let env ← getEnv
+    -- let ctx ← getLCtx
+    -- getLocalDeclFromUserName (find FVAr)
+    -- resolveName
     if let .some s := env.find? schema.getId then
       let (query, _) ← (elabQuery query).run { expr := s.value! }
       pure query
     else
       throwUnsupportedSyntax
-  | _ => throwUnsupportedSyntax
 
 def schema : String → List Field
   | "myTable" => [Field.nat "id", Field.nat "name"]
@@ -353,13 +362,15 @@ def schema : String → List Field
   | "thirdTable" => [Field.nat "id", Field.varchar 255 "someField"]
   | _ => []
 
+def x := queryOn QuerySyntax.schema | SELECT name FROM myTable
 def nested := queryOn QuerySyntax.schema |
   SELECT *
   FROM (SELECT id
         FROM (SELECT *
               FROM myTable))
 
-def join := queryOn QuerySyntax.schema | SELECT name, date FROM myTable INNER JOIN otherTable ON myTable.id = otherTable.id
+def join := queryOn QuerySyntax.schema |
+  SELECT date, name FROM myTable INNER JOIN otherTable ON myTable.id = otherTable.id
 
 def implicitJoin := queryOn QuerySyntax.schema |
   SELECT myTable.id AS nm, X.date
@@ -375,14 +386,10 @@ def tableAliasNested := queryOn QuerySyntax.schema |
   SELECT y.id FROM thirdTable LEFT JOIN (myTable LEFT JOIN otherTable ON id = id) AS x ON id = id AS y
 
 def selectAliasNested := queryOn QuerySyntax.schema |
-  SELECT a.a.a FROM (SELECT id AS a FROM myTable) AS a.a
+  SELECT a.a.id FROM (SELECT id AS a FROM myTable) AS a.a
 
 def selectImplicitSimple := queryOn QuerySyntax.schema |
   SELECT myTable.id FROM myTable
-
--- TODO: treat π and σ seperately as part of a Query
-def selectInnerAlias := queryOn QuerySyntax.schema |
-  SELECT myTable.ID, MYTABLE.ID FROM (SELECT id AS ID FROM myTable AS MYTABLE)
 
 def s : String → List Field
   | "information_schema.tables" => [Field.varchar 255 "table_name", Field.nat "dummy"]

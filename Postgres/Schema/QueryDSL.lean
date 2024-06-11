@@ -47,6 +47,7 @@ inductive RawSQLSelect
   | list : Bool → List SQLSelectField → RawSQLSelect
   | all  : Bool → RawSQLSelect
 
+-- TODO: Comparison between typed fields and literals
 inductive SQLProp
   | tt : SQLProp
   | ff : SQLProp
@@ -69,30 +70,23 @@ inductive SQLProp
 inductive SQLJoin
   | inner | left | right | outer
 
-def Field.interp : Field → Type
-  | nat _ => Nat
-  | varchar n _ => Varchar n
-  | char _ => Char
-  | date _ => Date
-
-inductive Table : List Field → Type
-  | nil : Table []
-  | cons (x : u.interp) (xs : Table us) : Table (u :: us)
-
-def Table.of {us: List Field} (_ : Table us) : List Field := us
-
+-- TODO: remove Table
 mutual
-inductive SQLFrom : Type → Type (u + 1) where
-  | table        : String → SQLFrom (Table α)
-  | alias        : SQLFrom (Table α) → String  → SQLFrom (Table α)
-  | join         : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → SQLProp → SQLFrom (Table γ)
-  | joinUsing    : SQLJoin → SQLFrom (Table α) → SQLFrom (Table β) → DataEntry → SQLFrom (Table γ)
-  | implicitJoin : SQLFrom (Table α) → SQLFrom (Table β) → SQLFrom (Table γ)
-  | nestedJoin   : SQLQuery (Table α) → SQLFrom (Table α)
+inductive SQLFrom : List Field → Type where
+  | table        : String → SQLFrom α
+  | alias        : SQLFrom α → String  → SQLFrom α
+  | join         : SQLJoin → SQLFrom α → SQLFrom β → SQLProp → (h: γ = α ++ β := by simp) → SQLFrom γ
+  | implicitJoin : SQLFrom α → SQLFrom β → (h: γ = α ++ β := by simp) → SQLFrom γ
+  | nestedJoin   : SQLQuery α → SQLFrom α
 
-inductive SQLQuery : Type → Type (u + 1) where
-  | mk : SQLSelect α → SQLFrom (Table β) → SQLProp → SQLQuery (Table α)
+-- Projection as f : SQLQuery → SQLQuery
+inductive SQLQuery : List Field → Type where
+  | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) →  SQLQuery α
 end
+
+def a : SQLFrom [Field.nat "hi"] := SQLFrom.table "test"
+def b : SQLFrom [Field.nat "bye"] := SQLFrom.table "test2"
+def x : SQLFrom [Field.nat "hi", Field.nat "bye"] := SQLFrom.implicitJoin a b
 
 inductive RawSQLFrom
   | table        : String  → RawSQLFrom
@@ -150,15 +144,14 @@ instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
 mutual
 def SQLFrom.toString : SQLFrom α → String
-  | SQLFrom.table s            => s
-  | SQLFrom.alias f s         => s!"({f.toString}) AS {s}"
-  | SQLFrom.join j l r p       => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
-  | SQLFrom.joinUsing j l r d  => s!"{l.toString} {j} JOIN {r.toString} USING {d}"
-  | SQLFrom.implicitJoin t₁ t₂ => s!"{t₁.toString}, {t₂.toString}"
-  | SQLFrom.nestedJoin q       => q.toString
+  | SQLFrom.table s             => s
+  | SQLFrom.alias f s           => s!"({f.toString}) AS {s}"
+  | SQLFrom.join j l r p _      => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
+  | SQLFrom.implicitJoin t₁ t₂ _ => s!"{t₁.toString}, {t₂.toString}"
+  | SQLFrom.nestedJoin q        => q.toString
 
 def SQLQuery.toString : SQLQuery α → String
-  | SQLQuery.mk s f w => s!"SELECT {s} FROM {f.toString} WHERE {w}"
+  | SQLQuery.mk s f w _ => s!"SELECT {s} FROM {f.toString} WHERE {w}"
 end
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩

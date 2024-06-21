@@ -4,36 +4,8 @@
   Authors: Arthur Paulino, Florian Würmseer
 -/
 
-import Postgres.Schema.DataEntries
+import Postgres.Schema.Literal
 import Postgres.Schema.InsertDSL
-
-inductive Field
-  | nat : String → Field
-  | varchar (n : Nat) : String → Field
-  | char : String → Field
-  | date : String → Field
-  deriving BEq, Repr, Hashable
-
-def Field.ToString : Field → String
-  | nat s => s!"Nat {s}"
-  | varchar n s => s!"Varchar {n} {s}"
-  | char s => s!"Char {s}"
-  | date s => s!"Date {s}"
-
-def Field.getName : Field → String
-  | nat s => s
-  | varchar _ s => s
-  | char s => s
-  | date s => s
-
-def Field.setName : Field → String → Field
-  | nat _, new => nat new
-  | varchar n _, new => varchar n new
-  | char _, new => char new
-  | date _, new => date new
-
-instance : ToString Field :=
-  ⟨Field.ToString⟩
 
 inductive SQLSelectField
   | col   : String → SQLSelectField
@@ -47,46 +19,37 @@ inductive RawSQLSelect
   | list : Bool → List SQLSelectField → RawSQLSelect
   | all  : Bool → RawSQLSelect
 
--- TODO: Comparison between typed fields and literals
+-- Relation über AST dass feld vom typen ist
 inductive SQLProp
-  | tt : SQLProp
-  | ff : SQLProp
-  | eqC : String  → String    → SQLProp
-  | neC : String  → String    → SQLProp
-  | ltC : String  → String    → SQLProp
-  | leC : String  → String    → SQLProp
-  | gtC : String  → String    → SQLProp
-  | geC : String  → String    → SQLProp
-  | eqE : String  → DataEntry → SQLProp
-  | neE : String  → DataEntry → SQLProp
-  | ltE : String  → DataEntry → SQLProp
-  | leE : String  → DataEntry → SQLProp
-  | gtE : String  → DataEntry → SQLProp
-  | geE : String  → DataEntry → SQLProp
+  | tt  : SQLProp
+  | ff  : SQLProp
+  | eq (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
+  | ne (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
+  | lt (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
+  | le (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
+  | gt (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
+  | ge (l r : Literal) : (h: l.interp = r.interp := by rfl) → SQLProp
   | and : SQLProp → SQLProp   → SQLProp
   | or  : SQLProp → SQLProp   → SQLProp
   | not : SQLProp → SQLProp
 
+def x := SQLProp.eq (Literal.int 3) (Literal.field <| Field.nat "")
+
 inductive SQLJoin
   | inner | left | right | outer
 
--- TODO: remove Table
 mutual
-inductive SQLFrom : List Field → Type where
+inductive SQLFrom : List Field → Type
   | table        : String → SQLFrom α
   | alias        : SQLFrom α → String  → SQLFrom α
   | join         : SQLJoin → SQLFrom α → SQLFrom β → SQLProp → (h: γ = α ++ β := by simp) → SQLFrom γ
   | implicitJoin : SQLFrom α → SQLFrom β → (h: γ = α ++ β := by simp) → SQLFrom γ
   | nestedJoin   : SQLQuery α → SQLFrom α
 
--- Projection as f : SQLQuery → SQLQuery
-inductive SQLQuery : List Field → Type where
+inductive SQLQuery : List Field → Type
   | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) →  SQLQuery α
+  | proj : SQLQuery β → (α : List Field) → SQLQuery α
 end
-
-def a : SQLFrom [Field.nat "hi"] := SQLFrom.table "test"
-def b : SQLFrom [Field.nat "bye"] := SQLFrom.table "test2"
-def x : SQLFrom [Field.nat "hi", Field.nat "bye"] := SQLFrom.implicitJoin a b
 
 inductive RawSQLFrom
   | table        : String  → RawSQLFrom
@@ -116,20 +79,14 @@ instance : ToString (SQLSelect α) := ⟨SQLSelect.toString⟩
 def SQLProp.toString : SQLProp → String
   | tt      => "TRUE"
   | ff      => "FALSE"
-  | eqC l r => s!"{l} = {r}"
-  | neC l r => s!"{l} <> {r}"
-  | ltC l r => s!"{l} < {r}"
-  | leC l r => s!"{l} <= {r}"
-  | gtC l r => s!"{l} > {r}"
-  | geC l r => s!"{l} >= {r}"
-  | eqE l r => s!"{l} = {r}"
-  | neE l r => s!"{l} <> {r}"
-  | ltE l r => s!"{l} < {r}"
-  | leE l r => s!"{l} <= {r}"
-  | gtE l r => s!"{l} > {r}"
-  | geE l r => s!"{l} >= {r}"
+  | eq l r _ => s!"{l} = {r}"
+  | ne  l r _ => s!"{l} <> {r}"
+  | lt  l r _ => s!"{l} < {r}"
+  | le  l r _ => s!"{l} <= {r}"
+  | gt  l r _ => s!"{l} > {r}"
+  | ge  l r _ => s!"{l} >= {r}"
   | and l r => s!"({l.toString}) AND ({r.toString})"
-  | or  l r => s!"({l.toString}) OR ({r.toString})"
+  | or  l r  => s!"({l.toString}) OR ({r.toString})"
   | not w   => s!"NOT ({w.toString})"
 
 instance : ToString SQLProp := ⟨SQLProp.toString⟩
@@ -144,14 +101,15 @@ instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
 mutual
 def SQLFrom.toString : SQLFrom α → String
-  | SQLFrom.table s             => s
-  | SQLFrom.alias f s           => s!"({f.toString}) AS {s}"
-  | SQLFrom.join j l r p _      => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
+  | SQLFrom.table s              => s
+  | SQLFrom.alias f s            => s!"({f.toString}) AS {s}"
+  | SQLFrom.join j l r p _       => s!"{l.toString} {j} JOIN {r.toString} ON {p}"
   | SQLFrom.implicitJoin t₁ t₂ _ => s!"{t₁.toString}, {t₂.toString}"
-  | SQLFrom.nestedJoin q        => q.toString
+  | SQLFrom.nestedJoin q         => q.toString
 
 def SQLQuery.toString : SQLQuery α → String
   | SQLQuery.mk s f w _ => s!"SELECT {s} FROM {f.toString} WHERE {w}"
+  | SQLQuery.proj q _ => s!"{q.toString}"
 end
 
 instance : ToString (SQLFrom α) := ⟨SQLFrom.toString⟩

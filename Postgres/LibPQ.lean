@@ -1,3 +1,9 @@
+/-
+  Copyright (c) 2024 Florian Würmseer. All rights reserved.
+  Released under Apache 2.0 license as described in the file LICENSE.
+  Authors: Florian Würmseer
+-/
+
 import Alloy.C
 
 open scoped Alloy.C
@@ -9,6 +15,11 @@ namespace LibPQ
 alloy c opaque_extern_type Connection => PGconn where
   finalize(ptr) :=
     PQfinish(ptr);
+
+structure Context where
+  conn: Connection
+
+abbrev SQL := ReaderT Context IO
 
 alloy c opaque_extern_type Result => PGresult where
   finalize(ptr) :=

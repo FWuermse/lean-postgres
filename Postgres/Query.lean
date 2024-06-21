@@ -11,10 +11,12 @@ open LibPQ Connection
 
 namespace Query
 
-def sendQuery (connection : Connection) (query : SQLQuery α) : IO <| Option <| List <| List String := do
-  let res ← exec connection query.toString
+def sendQuery (query : SQLQuery α) : SQL <| Option <| List <| List String := do
+  let ctx ← read
+  let conn := ctx.conn
+  let res ← exec conn query.toString
   if res.status != .tuplesOk then
-    let error ← connection.error
+    let error ← conn.error
     IO.println <| error
     pure .none
   else

@@ -1,3 +1,9 @@
+/-
+  Copyright (c) 2024 Florian Würmseer. All rights reserved.
+  Released under Apache 2.0 license as described in the file LICENSE.
+  Authors: Florian Würmseer
+-/
+
 import Postgres.Schema.DeleteDSL
 import Postgres.Schema.QuerySyntax
 
@@ -25,7 +31,8 @@ def elabDeleteFrom : TSyntax `deleteFrom → TermElabM Expr
 @[term_elab delete] def deleteQuery : Term.TermElab := fun stx _ =>
   match stx with
   | `(delete|DELETE FROM $df:deleteFrom WHERE $p:prop) => do
-    pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (← elabProp p)
+    --pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (← elabProp p)
+    throwError "DELETE without Schema currently not supported"
   | `(delete|DELETE FROM $df:deleteFrom) => do
     pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (mkConst ``SQLProp.tt)
   | _ => throwUnsupportedSyntax

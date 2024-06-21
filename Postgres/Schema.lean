@@ -1,7 +1,7 @@
 import Postgres.Schema.Utils
 import Postgres.Schema.QueryDSL
 import Postgres.Schema.QuerySyntax
-import Postgres.Schema.DataEntries
+import Postgres.Schema.Literal
 import Postgres.Schema.DeleteDSL
 import Postgres.Schema.DeleteSyntax
 import Postgres.Schema.InsertDSL

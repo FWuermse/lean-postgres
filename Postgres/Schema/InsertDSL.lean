@@ -1,25 +1,18 @@
-import Postgres.Util
+/-
+  Copyright (c) 2024 Florian Würmseer. All rights reserved.
+  Released under Apache 2.0 license as described in the file LICENSE.
+  Authors: Florian Würmseer
+-/
 
-open Util
+import Postgres.Util
+import Postgres.Schema.Literal
+
+open Util Literal
 
 class ToByteArray (α : Type u) where
   toByteArray : α → ByteArray
 
 export ToByteArray (toByteArray)
-
-inductive Varchar (n : Nat) where
-  | mk : (s: String) → (h : s.length <= n := by decide) → Varchar n
-
-instance : ToString (Varchar i) where
-  toString vc := match vc with
-    | Varchar.mk s _ => s!"{s}"
-
-inductive Date where
-  | mk : (y : Nat) → (m : Fin 13) → (d : Fin 32) → (h : m > 0 ∧ d > 0 := by simp) →  Date
-
-instance : ToString Date where
-  toString date := match date with
-    | Date.mk y m d _ => s!"{y}-{m}-{d}"
 
 inductive Univ
   | nat

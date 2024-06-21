@@ -1,3 +1,9 @@
+/-
+  Copyright (c) 2024 Florian Würmseer. All rights reserved.
+  Released under Apache 2.0 license as described in the file LICENSE.
+  Authors: Florian Würmseer
+-/
+
 import Postgres.Schema.InsertDSL
 import Postgres.Schema.DDLDSL
 import Lean
@@ -42,8 +48,7 @@ def elabCreateScope : TSyntax `createScope → TermElabM Expr
 def elabSQLType : TSyntax `insertType → TermElabM Expr
   | `(insertType|Char) => pure <| mkConst ``Univ.char
   | `(insertType|Num) => pure <| mkConst ``Univ.nat
-  -- TODO: shouldn't be casted to nat
-  | `(insertType|Varchar($n:num)) => pure <| mkApp (mkConst ``Univ.varchar) (mkApp (mkConst ``Nat.toUInt8) (mkNatLit n.getNat))
+  | `(insertType|Varchar($n:num)) => pure <| mkApp (mkConst ``Univ.varchar)  (mkNatLit n.getNat)
   | `(insertType|Date) => pure <| mkConst ``Univ.date
   | _ => throwUnsupportedSyntax
 

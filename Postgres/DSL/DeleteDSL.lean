@@ -5,7 +5,7 @@
 -/
 
 
-import Postgres.Schema.QueryDSL
+import Postgres.DSL.QueryDSL
 
 namespace DeleteDSL
 
@@ -21,7 +21,7 @@ instance : ToString DeleteFrom :=
   ⟨DeleteFrom.toString⟩
 
 inductive SQLDelete
-  | mk : DeleteFrom → SQLProp → SQLDelete
+  | mk : DeleteFrom → SQLUntypedProp → SQLDelete
 
 def SQLDelete.toString : SQLDelete → String
   | .mk df p => s!"DELETE FROM {df} WHERE {p}"

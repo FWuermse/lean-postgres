@@ -4,8 +4,8 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Schema.InsertDSL
-import Postgres.Schema.DDLDSL
+import Postgres.DSL.InsertDSL
+import Postgres.DSL.DDLDSL
 import Lean
 
 open InsertDSL

@@ -5,11 +5,9 @@
 -/
 
 import Lean
-import Postgres.Schema.QueryDSL
+import Postgres.DSL.Schema.QueryDSL
 
 open Lean Elab Meta Term
-
-namespace QuerySyntax
 
 declare_syntax_cat      parsId
 syntax ident          : parsId
@@ -61,7 +59,7 @@ syntax " RIGHT " : join
 syntax " OUTER " : join
 
 declare_syntax_cat                                      sqlFrom
-declare_syntax_cat                                      query
+declare_syntax_cat                                      sqlQuery
 
 syntax ident                                          : sqlFrom
 syntax sqlFrom ", " sqlFrom                           : sqlFrom
@@ -69,14 +67,11 @@ syntax sqlFrom " AS " ident                           : sqlFrom
 syntax sqlFrom join " JOIN " sqlFrom " ON " prop      : sqlFrom
 syntax sqlFrom join " JOIN " sqlFrom " USING " parsId : sqlFrom
 syntax "(" sqlFrom ")"                                : sqlFrom
-syntax "(" query ")"                                  : sqlFrom
+syntax "(" sqlQuery ")"                               : sqlFrom
 
-syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)? : query
+syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " prop)? : sqlQuery
 
-syntax (name := pgquery) "queryOn" ident " | " query : term
-
-def mkStrOfIdent (id : Syntax) : Expr :=
-  mkStrLit id.getId.toString
+syntax (name := pgquery) "queryOn" ident " | " sqlQuery : term
 
 structure QueryState :=
   expr : Expr
@@ -116,7 +111,7 @@ def elabField : Field → SchemaTermElabM Expr
   | Field.date s => pure <| mkApp (mkConst `Field.date) (mkStrLit s)
 
 partial def elabStrOfParsId : Syntax → TermElabM Expr
-  | `(parsId|$id:ident)      => pure $ mkStrOfIdent id
+  | `(parsId|$id:ident)      => pure $ mkStrLit id.getId.toString
   | `(parsId|($pars:parsId)) => elabStrOfParsId pars
   | _                        => throwUnsupportedSyntax
 
@@ -129,7 +124,7 @@ def elabCol : TSyntax `selectField → SchemaTermElabM Expr
   | `(selectField|$c:parsId)             => do
     mkAppM `SQLSelectField.col #[← elabStrOfParsId c]
   | `(selectField|$c:parsId AS $a:ident) => do
-    mkAppM `SQLSelectField.alias #[← elabStrOfParsId c, mkStrOfIdent a]
+    mkAppM `SQLSelectField.alias #[← elabStrOfParsId c, mkStrLit a.getId.toString]
   | _                                    => throwUnsupportedSyntax
 
 def findFieldsInTable : List Field → String → SchemaTermElabM (List Field) :=
@@ -208,9 +203,6 @@ def elabSelect : TSyntax `sqlSelect → SchemaTermElabM Expr
     pure <| mkApp3 (mkConst `SQLSelect.list) typ (mkConst ``false) (cols)
   | _                                       => throwUnsupportedSyntax
 
-def mkApp' (name : Name) (e : Expr) : Expr :=
-  mkApp (mkConst name) e
-
 def elabConst (name : Name) : TermElabM Expr :=
   pure $ mkConst name
 
@@ -219,16 +211,16 @@ def negFloat (f : Float) : Float :=
 
 partial def elabLiteral : TSyntax `literal → TermElabM Expr
   | `(literal|$v:num)         =>
-    mkAppM `Literal.int #[mkApp' `Int.ofNat (mkNatLit v.getNat)]
+    mkAppM `Literal.int #[mkApp (mkConst `Int.ofNat) (mkNatLit v.getNat)]
   | `(literal|-$v:num)        =>
     mkAppM `Literal.int $ match v.getNat with
-      | Nat.zero   => #[mkApp' `Int.ofNat (mkConst `Nat.zero)]
-      | Nat.succ n => #[mkApp' `Int.negSucc (mkNatLit n)]
+      | Nat.zero   => #[mkApp (mkConst `Int.ofNat) (mkConst `Nat.zero)]
+      | Nat.succ n => #[mkApp (mkConst `Int.negSucc) (mkNatLit n)]
   | `(literal|$v:scientific)  => do
     mkAppM `Literal.int #[← Term.elabScientificLit v (mkConst `Float)]
   | `(literal|-$v:scientific) => do
     let f ← Term.elabScientificLit v (mkConst `Float)
-    mkAppM `Literal.int #[mkApp' `negFloat f]
+    mkAppM `Literal.int #[mkApp (mkConst `negFloat) f]
   | `(literal|$v:str)         =>
     mkAppM `Literal.string #[mkStrLit $ v.getString]
   | `(literal|NULL)              => elabConst `DataEntry.ENull
@@ -318,17 +310,17 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
     let tableName := t.getId.toString
     let state ← get
     -- Get List from Schema
-    let typ ← whnf (mkApp state.expr (mkStrOfIdent t))
+    let typ ← whnf (mkApp state.expr (mkStrLit t.getId.toString))
     -- Set State for Tagging
     set { state with expr := typ, tag := tableName, tables := state.tables.insert tableName }
     -- Remove
     let _ ← tagFromList
-    pure <| mkApp2 (mkConst `SQLFrom.table) (← get).expr (mkStrOfIdent t)
+    pure <| mkApp2 (mkConst `SQLFrom.table) (← get).expr (mkStrLit t.getId.toString)
   | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
     let frm ← elabFrom f
     let state ← get
     set { state with tableAlias := state.tableAlias.insert t.getId.toString state.tables }
-    pure <| mkApp3 (mkConst `SQLFrom.alias) (← get).expr (frm) (mkStrOfIdent t)
+    pure <| mkApp3 (mkConst `SQLFrom.alias) (← get).expr (frm) (mkStrLit t.getId.toString)
   | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
     let elabFromFun := elabFrom l |>.run
     let (lfrm, ltyp) ← elabFromFun (← get)
@@ -351,13 +343,13 @@ partial def elabFrom : TSyntax `sqlFrom → SchemaTermElabM Expr
     pure <| mkApp4 (mkApp3 (mkConst `SQLFrom.joinUsing) ltyp.expr rtyp.expr typ) (← elabJoin j) lfrm rfrm (← elabStrOfParsId p)
   | `(sqlFrom|($f:sqlFrom))           => do
     elabFrom f
-  | `(sqlFrom| ($query:query)) => do
+  | `(sqlFrom| ($query:sqlQuery)) => do
     let qry ← elabQuery query
     pure <| mkApp2 (mkConst `SQLFrom.nestedJoin) (← get).expr qry
   | _                                 => throwUnsupportedSyntax
 
-partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
-  | `(query| SELECT $sel FROM $frm:sqlFrom $[WHERE $prp]?) => do
+partial def elabQuery : TSyntax `sqlQuery → SchemaTermElabM Expr
+  | `(sqlQuery| SELECT $sel FROM $frm:sqlFrom $[WHERE $prp]?) => do
     let state ← get
     let (frm, ftyp) ← elabFrom frm |>.run state
     let ftyp := { ftyp with tag := .none }
@@ -376,6 +368,8 @@ partial def elabQuery : TSyntax `query → SchemaTermElabM Expr
       pure query
   | _ => throwUnsupportedSyntax
 end
+
+namespace QuerySyntax
 
 elab_rules : term
   | `(pgquery| queryOn $schema | $query) => do

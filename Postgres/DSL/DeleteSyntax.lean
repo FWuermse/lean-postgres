@@ -4,8 +4,8 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Schema.DeleteDSL
-import Postgres.Schema.QuerySyntax
+import Postgres.DSL.DeleteDSL
+import Postgres.DSL.QuerySyntax
 
 open DeleteDSL
 open QuerySyntax
@@ -18,7 +18,7 @@ declare_syntax_cat          deleteFrom
 syntax ident              : deleteFrom
 syntax ident " AS " ident : deleteFrom
 
-syntax (name := delete) "DELETE FROM " deleteFrom (" WHERE " prop)? : term
+syntax (name := delete) "DELETE FROM " deleteFrom (" WHERE " propU)? : term
 
 def mkStrOfIdent (id : Syntax) : Expr :=
   mkStrLit id.getId.toString
@@ -30,9 +30,8 @@ def elabDeleteFrom : TSyntax `deleteFrom → TermElabM Expr
 
 @[term_elab delete] def deleteQuery : Term.TermElab := fun stx _ =>
   match stx with
-  | `(delete|DELETE FROM $df:deleteFrom WHERE $p:prop) => do
-    --pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (← elabProp p)
-    throwError "DELETE without Schema currently not supported"
+  | `(delete|DELETE FROM $df:deleteFrom WHERE $p:propU) => do
+    pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (← elabPropU p)
   | `(delete|DELETE FROM $df:deleteFrom) => do
-    pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (mkConst ``SQLProp.tt)
+    pure <| mkApp2 (mkConst ``SQLDelete.mk) (← elabDeleteFrom df) (mkConst ``SQLUntypedProp.tt)
   | _ => throwUnsupportedSyntax

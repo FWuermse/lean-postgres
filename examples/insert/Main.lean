@@ -8,7 +8,7 @@ import Postgres
 
 open InsertSyntax DeleteSyntax LibPQ PQInsert Delete Query
 
-def main : IO Unit := do
+def myDDLStatements : SQL Unit := do
   let insertQuery :=
     INSERT INTO employee
     VALUES [
@@ -18,10 +18,14 @@ def main : IO Unit := do
     ]
   IO.println insertQuery.values
   IO.println insertQuery.table
-  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
-  let _ ← insert conn insertQuery
+  let _ ← insert insertQuery
   let deleteQuery :=
     DELETE FROM employee WHERE nr = 123 OR nr = 999
+  let _ ← delete deleteQuery
+
+def main : IO Unit := do
+  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
+  myDDLStatements.run {conn}
 
 -- Typechecks:
 #check [

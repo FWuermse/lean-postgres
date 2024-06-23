@@ -20,12 +20,12 @@ def main : IO Unit := do
   let conn₂ ← connect "host=localhost port=5432 dbname=postgres user=postgres password=password connect_timeout=10"
   let status := conn₁.status
   IO.println <| status.toString
-  IO.println <| ← listTables conn₁
+  IO.println <| ← listTables ⟨conn₁⟩
   -- conn₂ closed due to ref count
-  IO.println <| ← listTables conn₂
-  let query :=
+  IO.println <| ← listTables ⟨conn₂⟩
+  let untypedQuery := query |
     SELECT id, name, age
     FROM mytable
   -- conn₁ closed due to ref count
-  let res ← sendQuery conn₁ query
+  let res ← sendUntypedQuery untypedQuery |>.run ⟨conn₁⟩
   IO.println $ stringTables res

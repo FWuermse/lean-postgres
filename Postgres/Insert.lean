@@ -5,13 +5,15 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Schema.InsertDSL
+import Postgres.DSL.InsertDSL
 
 open LibPQ Connection InsertDSL
 
 namespace PQInsert
 
-def insert {α : List Univ} (conn : Connection) (query : @InsertQuery α) : IO Response := do
+def insert {α : List Univ} (query : @InsertQuery α) : SQL Response := do
+  let ctx ← read
+  let conn := ctx.conn
   -- Only stored for the duration of the pq session
   let seed := s!"{← IO.rand 0 1000000000}"
   let table := query.table

@@ -13,19 +13,27 @@ def stringTables (table : Option (List (List String))) : String :=
   | none => "Error"
   | some t => "\n".intercalate (t.map (", ".intercalate .))
 
+def untypedQueries : SQL Unit := do
+  let query := query |
+    SELECT surname, nr, employment_date
+    FROM employee
+    WHERE employee.employment_date <= "1800-12-31"
+  let res ← sendUntypedQuery query
+  IO.println <| stringTables res
+  IO.println query
+
 def schema : String → List Field
   | "employee" => [Field.nat "id", Field.varchar 255 "name"]
   | "customer" => [Field.nat "id", Field.date "date"]
   | "thirdTable" => [Field.nat "id", Field.varchar 255 "someField"]
   | _ => []
 
-def myQueries : SQL Unit := do
+def queriesOnSchema : SQL Unit := do
   -- Type: SQLQuery [Field.nat "employee.id", Field.varchar 255 "employee.name"]
-  let query := queryOn schema |
-    SELECT *
+  let query := queryOn schema | SELECT *
     FROM employee
   let res ← sendQuery query
-  IO.println $ stringTables res
+  IO.println <| stringTables res
   IO.println query
 
   -- Some more quries with schema typing:
@@ -66,4 +74,5 @@ def myQueries : SQL Unit := do
 
 def main : IO Unit := do
   let conn ← login "localhost" "5432" "postgres" "postgres" "password"
-  myQueries.run {conn}
+  queriesOnSchema.run {conn}
+  untypedQueries.run {conn}

@@ -4,7 +4,7 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Schema.InsertDSL
+import Postgres.DSL.InsertDSL
 
 open InsertDSL
 

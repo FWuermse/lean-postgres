@@ -4,20 +4,13 @@
   Authors: Arthur Paulino, Florian Würmseer
 -/
 
-import Postgres.Schema.Literal
-import Postgres.Schema.InsertDSL
-
-inductive SQLSelectField
-  | col   : String → SQLSelectField
-  | alias : String → String         → SQLSelectField
+import Postgres.DSL.Literal
+import Postgres.DSL.InsertDSL
+import Postgres.DSL.QueryDSL
 
 inductive SQLSelect (α : List Field)
   | list : Bool → List SQLSelectField → SQLSelect α
   | all  : Bool → SQLSelect α
-
-inductive RawSQLSelect
-  | list : Bool → List SQLSelectField → RawSQLSelect
-  | all  : Bool → RawSQLSelect
 
 -- Relation über AST dass feld vom typen ist
 inductive SQLProp
@@ -33,11 +26,6 @@ inductive SQLProp
   | or  : SQLProp → SQLProp   → SQLProp
   | not : SQLProp → SQLProp
 
-def x := SQLProp.eq (Literal.int 3) (Literal.field <| Field.nat "")
-
-inductive SQLJoin
-  | inner | left | right | outer
-
 mutual
 inductive SQLFrom : List Field → Type
   | table        : String → SQLFrom α
@@ -50,22 +38,6 @@ inductive SQLQuery : List Field → Type
   | mk : SQLSelect α → SQLFrom β → SQLProp → (h: α ⊆ β := by simp) →  SQLQuery α
   | proj : SQLQuery β → (α : List Field) → SQLQuery α
 end
-
-inductive RawSQLFrom
-  | table        : String  → RawSQLFrom
-  | alias        : RawSQLFrom → String  → RawSQLFrom
-  | join         : SQLJoin → RawSQLFrom → RawSQLFrom → SQLProp → RawSQLFrom
-  | implicitJoin : RawSQLFrom → RawSQLFrom → RawSQLFrom
-
-inductive RawSQLQuery where
-  | mk : RawSQLSelect → RawSQLFrom → SQLProp → RawSQLQuery
-  | nstd : RawSQLSelect → RawSQLQuery → SQLProp → RawSQLQuery
-
-def SQLSelectField.toString : SQLSelectField → String
-  | col   c   => c
-  | .alias c a => s!"{c} AS {a}"
-
-instance : ToString (SQLSelectField) := ⟨SQLSelectField.toString⟩
 
 def SQLSelect.distinct? (d : Bool) : String :=
   if d then "DISTINCT " else default
@@ -90,14 +62,6 @@ def SQLProp.toString : SQLProp → String
   | not w   => s!"NOT ({w.toString})"
 
 instance : ToString SQLProp := ⟨SQLProp.toString⟩
-
-def SQLJoin.toString : SQLJoin → String
-  | inner => "INNER"
-  | left  => "LEFT"
-  | right => "RIGHT"
-  | outer => "OUTER"
-
-instance : ToString SQLJoin := ⟨SQLJoin.toString⟩
 
 mutual
 def SQLFrom.toString : SQLFrom α → String

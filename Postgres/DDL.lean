@@ -5,10 +5,10 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Schema.DDLSyntax
-import Postgres.Schema.QuerySyntax
-import Postgres.Schema.QueryDSL
-import Postgres.Schema.DDLDSL
+import Postgres.DSL.DDLSyntax
+import Postgres.DSL.QuerySyntax
+import Postgres.DSL.QueryDSL
+import Postgres.DSL.DDLDSL
 import Postgres.Query
 
 open LibPQ
@@ -16,17 +16,13 @@ open DDLDSL DDLSyntax Query
 
 namespace DDL
 
-def schema : String → List Field
-  | "information_schema.tables" => [Field.varchar 255 "table_name", Field.varchar 255 "table_schema", Field.varchar 255 "table_type"]
-  | _ => []
-
 def listTables : SQL (List String) := do
-  let query := queryOn DDL.schema |
+  let query := query |
     SELECT table_name
     FROM information_schema.tables
     WHERE table_schema = "public"
       AND table_type = "BASE TABLE"
-  let tables ← sendQuery query
+  let tables ← sendUntypedQuery query
   let res := match tables with
     | some xs => xs.map "\n".intercalate
     | _ => []

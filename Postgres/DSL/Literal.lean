@@ -4,7 +4,7 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Schema.Utils
+import Postgres.DSL.Utils
 
 inductive Varchar (n : Nat) where
   | mk : (s: String) → (h : s.length <= n := by decide) → Varchar n

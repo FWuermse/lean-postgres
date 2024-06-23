@@ -5,13 +5,15 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Schema.DeleteDSL
+import Postgres.DSL.DeleteDSL
 
 open LibPQ Connection DeleteDSL
 
 namespace Delete
 
-def delete (conn : Connection) (query : SQLDelete) : IO (Option ResultStatus) := do
+def delete (query : SQLDelete) : SQL (Option ResultStatus) := do
+  let ctx ← read
+  let conn := ctx.conn
   let res ← exec conn query.toString
   if res.status != .tuplesOk then
     let error ← conn.error

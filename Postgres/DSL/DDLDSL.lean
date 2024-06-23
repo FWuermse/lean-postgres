@@ -4,8 +4,8 @@
   Authors: Florian Würmseer
 -/
 
-import Postgres.Schema.InsertDSL
-import Postgres.Schema.InsertSyntax
+import Postgres.DSL.InsertDSL
+import Postgres.DSL.InsertSyntax
 
 namespace DDLDSL
 

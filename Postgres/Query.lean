@@ -5,13 +5,29 @@
 -/
 
 import Postgres.LibPQ
-import Postgres.Schema.QueryDSL
+import Postgres.DSL.QueryDSL
+import Postgres.DSL.Schema.QueryDSL
+import Postgres.DSL.Schema.QuerySyntax
 
-open LibPQ Connection
+open LibPQ Connection QuerySyntax
 
 namespace Query
 
 def sendQuery (query : SQLQuery α) : SQL <| Option <| List <| List String := do
+  let ctx ← read
+  let conn := ctx.conn
+  let res ← exec conn query.toString
+  if res.status != .tuplesOk then
+    let error ← conn.error
+    IO.println <| error
+    pure .none
+  else
+    let rows := List.map Nat.toUSize <| List.range (← nTuples res).toNat
+    let columns := List.map Nat.toUSize <| List.range (← nFields res).toNat
+    let table ← rows.mapM fun x => columns.mapM fun y => getValue res x y
+    pure table
+
+def sendUntypedQuery (query : SQLUntypedQuery) : SQL <| Option <| List <| List String := do
   let ctx ← read
   let conn := ctx.conn
   let res ← exec conn query.toString

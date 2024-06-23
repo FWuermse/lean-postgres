@@ -5,7 +5,7 @@
 -/
 
 import Postgres.Util
-import Postgres.Schema.Literal
+import Postgres.DSL.Literal
 
 open Util Literal
 

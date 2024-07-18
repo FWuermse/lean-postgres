@@ -32,7 +32,7 @@ docker run -d --name postgres -e POSTGRES_PASSWORD=password -v ~/my-volume:/var/
 
 ### Code
 
-Please find examples in the [example folder](https://github.com/FWuermse/lean-postgres/tree/master/examples/open-connection).
+Please find examples in the [example folder](https://github.com/FWuermse/lean-postgres/tree/master/examples).
 
 ## TODOs
 - [ ] DDL schema validation

@@ -27,6 +27,12 @@ instance : LawfulBEq Typ where
     . rw [BEq.beq]
       cases h <;> rfl
 
+def inRel (l : List (String × Typ)) : (String × Typ) → Prop
+  | (a, b) => (a, b) ∈ l
+
+instance : DecidablePred (inRel l) :=
+  λ p => List.instDecidableMemListInstMembershipList p l
+
 abbrev RelationType := List (String × Typ)
 
 abbrev Schema := List (String × RelationType)
@@ -53,7 +59,12 @@ inductive Aexpr
 
 @[aesop unsafe 100% apply]
 inductive WellFormedAexpr : RelationType × RelationType → Aexpr → Type → Prop
-  | field : name ∈ Γ.fst ∨ name ∈ Γ.snd → WellFormedAexpr Γ (.field n) Typ
+  | value :
+    ----------------------------------
+    WellFormedAexpr Γ (.value v) Typ
+  | field : field ∈ Γ.fst ∨ field ∈ Γ.snd →
+    ----------------------------------
+    WellFormedAexpr Γ (.field n) Typ
 
 inductive Aop
   | eq
@@ -63,9 +74,18 @@ inductive Aop
   | gt
   | ge
 
+def Aop.aop {α : Type} [DecidableEq α] [LT α] [LE α] : Aop → (α → α → Bool)
+  | Aop.eq => (. == .)
+  | Aop.ne => (. != .)
+  | _ => sorry
+
 inductive Bop
   | and
   | or
+
+def Bop.bop
+  | and => Bool.and
+  | or => Bool.or
 
 /-
 # Bexpr
@@ -90,9 +110,9 @@ inductive Bexpr
 
 -- TODO: is it better for Type to be a Bool or Prop?
 @[aesop unsafe 100% apply]
-inductive WellFormedBexpr : RelationType × RelationType → Bexpr → Bool → Prop
+inductive WellFormedBexpr : (RelationType × RelationType) → Bexpr → Bool → Prop
   | tt : WellFormedBexpr Γ .tt true
-  | ff : WellFormedBexpr Γ .tt false
+  | ff : WellFormedBexpr Γ .ff false
   | not :
     WellFormedBexpr Γ b T →
     ----------------------------------
@@ -103,10 +123,10 @@ inductive WellFormedBexpr : RelationType × RelationType → Bexpr → Bool → 
     ----------------------------------
     WellFormedBexpr Γ (.bcmp b₁ op b₂) T₃
   | acmp :
-    WellFormedAexpr Γ b₁ T₁ →
-    WellFormedAexpr Γ b₂ T₂ →
+    WellFormedAexpr Γ a₁ T₁ →
+    WellFormedAexpr Γ a₂ T₂ →
     ----------------------------------
-    WellFormedBexpr Γ (.acmp b₁ op b₂) T₃
+    WellFormedBexpr Γ (.acmp a₁ op a₂) T₃
   -- TODO: case split over op in order to determine T₃ in relation to T₁, T₂?
 
 /-
@@ -127,16 +147,27 @@ nestedJoin: (_, Query) ∈ Ctx ∧ WellTypedQuery
 inductive From where
   | table        : (name : String) → From
   | alias        : From → (as : String) → From
-  | join         : Join → From → From → SQLProp → From
+  | join         : Join → From → From → Bexpr → From
   | implicitJoin : From → From → From
   -- | nestedJoin   : Query → From
 
 @[aesop unsafe 100% apply]
 inductive WellFormedFrom : Schema → From → RelationType → Prop
-  | table (n : String) : (n, T) ∈ Γ → WellFormedFrom Γ (.table n) T
-  | alias : a → WellFormedFrom Γ f T → WellFormedFrom Γ f' T
-  | join : WellFormedFrom Γ f₁ _ → WellFormedFrom Γ f₂ _ → WellFormedFrom Γ (.join j f₁ f₂ p) T
-  | implicitJoin : WellFormedFrom Γ f₁ _ → WellFormedFrom Γ f₂ _ → WellFormedFrom Γ (.implicitJoin f₁ f₂) T
+  | table (n : String) :
+    (n, T) ∈ Γ →
+    WellFormedFrom Γ (.table n) T
+  | alias :
+    a → WellFormedFrom Γ f T →
+    WellFormedFrom Γ f' T
+  | join :
+    WellFormedFrom Γ f₁ T₁ →
+    WellFormedFrom Γ f₂ T₂ →
+    WellFormedBexpr (T₁, T₂) p _ →
+    WellFormedFrom Γ (.join j f₁ f₂ p) (T₁ ++ T₂)
+  | implicitJoin :
+    WellFormedFrom Γ f₁ T₁ →
+    WellFormedFrom Γ f₂ T₂ →
+    WellFormedFrom Γ (.implicitJoin f₁ f₂) (T₁ ++ T₂)
 
 /-
 # SelectField
@@ -155,8 +186,17 @@ inductive SelectField
   | alias : String → String         → SelectField
   deriving BEq, DecidableEq
 
+def SelectField.name
+  | col s => s
+  | «alias» _ s => s
+
 inductive WellFormedSelectField : RelationType → SelectField → Typ → Prop
-  | col (n : String) : (n, T) ∈ Γ → WellFormedSelectField Γ (.col n) T
+  | col (n : String) :
+    (n, T) ∈ Γ →
+    WellFormedSelectField Γ (.col n) T
+  | alias (n : String) :
+    (n, T) ∈ Γ →
+    WellFormedSelectField Γ (.alias a n) T
 
 /-
 # Select
@@ -180,19 +220,12 @@ TODO: support for functions such as count etc.
 -/
 @[aesop unsafe 100% apply]
 inductive WellFormedSelect : RelationType → Select → RelationType → Prop
-  --| list d (ss : List SelectField) : ∀ sel : SelectField, ∀ sp : String × Typ, sel ∈ ss ∧ sp ∈ T → WellFormedSelectField tT sel sp.snd → (d = true → ss.eraseDups = ss) → WellFormedSelect Γ select T
-  | list d (ss : List SelectField) (sel : SelectField) (sp : String × Typ) :
-    sel ∈ ss ∧ sp ∈ T →
-    WellFormedSelectField tT sel sp.snd →
-    (d = true → ss.eraseDups = ss) →
+  | list (h : ∀ s ∈ ss, WellFormedSelectField T s t) :
     ----------------------------------
-    WellFormedSelect Γ select T
-  | all d e :
-    (d = false → e ∈ T → (_, e.snd) ∈ Γ) →
-    (d = true → e ∈ T.eraseDups →
-    (_, e.snd) ∈ Γ) →
+    WellFormedSelect Γ (.list _ ss) T
+  | all (h: ∀ x ∈ T, x ∈ Γ) :
     ----------------------------------
-    WellFormedSelect Γ s T
+    WellFormedSelect Γ t T
 
 /-
 # Query
@@ -221,12 +254,9 @@ inductive WellFormedQuery : Schema → Query → RelationType → Prop
 example : WellFormedQuery [("myTable", [("MyField", .bigInt)])] ⟨.all false, .table "myTable", .tt⟩ [("MyField", Typ.bigInt)] := by
   apply WellFormedQuery.mk
   . apply WellFormedSelect.all
-    . intro _ c
-      replace c : ("MyField", .bigInt) ∈ [("MyField", Typ.bigInt)] := by apply c
-      apply c
-    . intro _ c
-      exact c
-    . exact false
+    . simp
+      have h : ("MyField", .bigInt) ∈ [("MyField", Typ.bigInt)] := by simp
+      apply h
   . apply WellFormedFrom.table "myTable"
     . aesop
   . apply WellFormedBexpr.tt
@@ -245,7 +275,67 @@ def getFromTable (Γ : Schema) : (t : From) → Option RelationType
     let snd ← getFromTable Γ frm₂
     fst ++ snd
 
-def checkFrom (Γ : Schema) (T : RelationType) : From → Option (Σ' T, WellFormedFrom Γ t T)
+def checkSelectField (Γ : RelationType) (s : SelectField) (T : Typ) : Option (Σ' T, WellFormedSelectField Γ s T) := match s with
+  | .col s => do
+    if h : (s, T) ∈ Γ then
+      pure ⟨T, WellFormedSelectField.col s h⟩
+    else
+      .none
+  | .alias _ s =>
+    if h : (s, T) ∈ Γ then
+      pure ⟨T, WellFormedSelectField.alias s h⟩
+    else
+      .none
+
+def checkSel (Γ T : RelationType) (s : Select) : Option (Σ' T, WellFormedSelect Γ s T) := match s with
+  | .all _ =>
+    if h : ∀ x ∈ T, x ∈ Γ then
+      let wsel := WellFormedSelect.all h
+      pure ⟨T, wsel⟩
+    else
+      .none
+  | .list d ss =>
+    let wellFormedFields := ss.all fun s =>
+      match checkSelectField Γ s sorry with
+      | some ⟨t, wf⟩ => true
+      | none => false
+    if wellFormedFields then
+      have h : ∀ s ∈ ss, WellFormedSelectField Γ s sorry :=
+        by
+          intro sf hsf
+          sorry
+      pure ⟨Γ, WellFormedSelect.list h⟩
+    else
+      .none
+
+def checkAexpr (Γ : RelationType × RelationType) (a : Aexpr) : Option (Σ' T, WellFormedAexpr Γ a T) := match a with
+  | .field (name, typ) =>
+    if h : (name, typ) ∈ Γ.fst ∨ (name, typ) ∈ Γ.snd then
+      let waexpr := WellFormedAexpr.field
+      pure ⟨_, waexpr h⟩
+    else
+      .none
+  | .value v => pure ⟨_, @WellFormedAexpr.value Γ v⟩
+
+def checkWhere (Γ : RelationType × RelationType) (w : Bexpr) : Option (Σ' T, WellFormedBexpr Γ w T) :=
+match w with
+  | .tt => pure ⟨_, WellFormedBexpr.tt⟩
+  | .ff => pure ⟨_, WellFormedBexpr.ff⟩
+  | .not bexpr => (checkWhere Γ bexpr).map fun ⟨_, e⟩ => ⟨_, WellFormedBexpr.not e⟩
+  | .bcmp bexpr₁ bop bexpr₂ => do
+    let ⟨b₁, fst⟩ ← checkWhere Γ bexpr₁
+    let ⟨b₂, snd⟩ ← checkWhere Γ bexpr₂
+    pure ⟨bop.bop b₁ b₂, @WellFormedBexpr.bcmp Γ bexpr₁ b₁ bexpr₂ b₂ bop _ fst snd⟩
+  | .acmp aexpr₁ aop aexpr₂ => do
+    if let .some ⟨a₁, fst⟩ := checkAexpr Γ aexpr₁ then
+      if let .some ⟨a₂, snd⟩ := checkAexpr Γ aexpr₂ then
+        pure ⟨true, @WellFormedBexpr.acmp Γ aexpr₁ a₁ aexpr₂ a₂ aop _ fst snd⟩ -- TODO: replace true with actual comparison (if it's even required)
+      else
+        .none
+    else
+      .none
+
+def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Option (Σ' T, WellFormedFrom Γ t T) := match t with
   | .table name =>
       if mem : (name, T) ∈ Γ then
         let wfrm := WellFormedFrom.table name mem
@@ -253,45 +343,47 @@ def checkFrom (Γ : Schema) (T : RelationType) : From → Option (Σ' T, WellFor
       else
         .none
   | .alias frm as =>
-    if let .some wfrm := checkFrom Γ T frm then
-      let wfrm := WellFormedFrom.alias as wfrm.snd
-      pure <| ⟨T, wfrm⟩
+    if let .some ⟨T, wfrm⟩ := checkFrom Γ T frm then
+      let wfrm := WellFormedFrom.alias as wfrm
+      pure ⟨T, wfrm⟩
     else
       .none
   | .implicitJoin frm₁ frm₂ =>
-    if let .some wfrm₁ := checkFrom Γ T frm₁ then
-      if let .some wfrm₂ := checkFrom Γ T frm₂ then
-        let wfrm := WellFormedFrom.implicitJoin wfrm₁.snd wfrm₂.snd
-        pure <| ⟨T, wfrm⟩
+    if let .some ⟨T₁, wfrm₁⟩ := checkFrom Γ T frm₁ then
+      if let .some ⟨T₂, wfrm₂⟩ := checkFrom Γ T frm₂ then
+        let wfrm := WellFormedFrom.implicitJoin wfrm₁ wfrm₂
+        pure ⟨T₁++T₂, wfrm⟩
       else
         .none
     else
       .none
-  | .join j frm₁ frm₂ prop =>
-    if let .some wfrm₁ := checkFrom Γ T frm₁ then
-      if let .some wfrm₂ := checkFrom Γ T frm₂ then
-        sorry
+  | .join _ frm₁ frm₂ prop =>
+    if let .some ⟨T₁, wfrm₁⟩ := checkFrom Γ T frm₁ then
+      if let .some ⟨T₂, wfrm₂⟩ := checkFrom Γ T frm₂ then
+        if let .some ⟨_, prp⟩ := checkWhere (T₁, T₂) prop then
+          let wfrm := @WellFormedFrom.join _ Γ frm₁ T₁ frm₂ T₂ prop _ wfrm₁ wfrm₂
+          pure ⟨_, wfrm prp⟩
+        else
+          .none
       else
         .none
     else
       .none
-
-def checkSel (Γ : RelationType) (T : RelationType) : (s : Select) → Option (PLift (WellFormedSelect Γ s T))
-  | .all d =>
-    sorry
-  | .list d ss =>
-    sorry
-
 
 -- Error monad (error, PLift..)
 -- Lean error location at actual location (withRef combinators as part of AST Nodes)
 def check (Γ : Schema) : (t : Query) → (T : RelationType) → Option (PLift (WellFormedQuery Γ t T))
-  | .mk sel frm whr, T => do
+  | ⟨sel, frm, whr⟩, Ts => do
     if let .some fromTable := getFromTable Γ frm then
-      if let .some wfrm := checkFrom Γ fromTable frm then
-        let wfrm := wfrm.snd
-        if let .some wsel := checkSel T sorry sel then
-          return PLift.up (.mk sorry wfrm sorry)
+      if let .some ⟨Tf, wfrm⟩ := checkFrom Γ fromTable frm then
+        if let .some ⟨Ts', wsel⟩ := checkSel Tf Ts sel then
+          if heq : Ts' = Ts then
+            if let .some ⟨_, wwhr⟩ := checkWhere (Ts, Tf) whr then
+              return PLift.up (.mk (Eq.subst heq wsel) wfrm wwhr)
+            else
+              .none
+          else
+            .none
         else
           .none
       else

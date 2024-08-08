@@ -27,12 +27,6 @@ instance : LawfulBEq Typ where
     . rw [BEq.beq]
       cases h <;> rfl
 
-def inRel (l : List (String × Typ)) : (String × Typ) → Prop
-  | (a, b) => (a, b) ∈ l
-
-instance : DecidablePred (inRel l) :=
-  λ p => List.instDecidableMemListInstMembershipList p l
-
 abbrev RelationType := List (String × Typ)
 
 abbrev Schema := List (String × RelationType)
@@ -198,6 +192,32 @@ inductive WellFormedSelectField : RelationType → SelectField → Typ → Prop
     (n, T) ∈ Γ →
     WellFormedSelectField Γ (.alias a n) T
 
+@[simp]
+def Forall (p : α → Prop) : List α → Prop
+  | [] => True
+  | x :: [] => p x
+  | x :: l => p x ∧ Forall p l
+
+namespace Forall
+
+theorem and_true_iff : p ∧ True ↔ p := iff_of_eq (and_true _)
+
+@[simp]
+theorem forall_cons (p : α → Prop) (x : α) : ∀ l : List α, Forall p (x :: l) ↔ p x ∧ Forall p l
+  | [] => (and_true_iff).symm
+  | _ :: _ => Iff.rfl
+
+@[simp]
+theorem forall_iff_forall_mem : ∀ {l : List α}, Forall p l ↔ ∀ x ∈ l, p x
+  | [] => (iff_true_intro <| List.forall_mem_nil _).symm
+  | x :: l => by rw [List.forall_mem_cons, forall_cons, forall_iff_forall_mem]
+
+@[simp]
+instance (p : α → Prop) [DecidablePred p] : DecidablePred (Forall p) := fun _ =>
+  decidable_of_iff' _ forall_iff_forall_mem
+
+end Forall
+
 /-
 # Select
 
@@ -220,7 +240,8 @@ TODO: support for functions such as count etc.
 -/
 @[aesop unsafe 100% apply]
 inductive WellFormedSelect : RelationType → Select → RelationType → Prop
-  | list (h : ∀ s ∈ ss, WellFormedSelectField T s t) :
+  | list (ss : List SelectField) :
+    Forall (WellFormedSelectField Γ . _) ss →
     ----------------------------------
     WellFormedSelect Γ (.list _ ss) T
   | all (h: ∀ x ∈ T, x ∈ Γ) :
@@ -287,6 +308,36 @@ def checkSelectField (Γ : RelationType) (s : SelectField) (T : Typ) : Option (�
     else
       .none
 
+instance (Γ : RelationType) (T : Typ) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isSome) :=
+  fun s =>
+    match s with
+    | .col name =>
+      if h : (name, T) ∈ Γ then
+        isTrue (by simp [checkSelectField, h])
+      else
+        isFalse (by simp [checkSelectField, h])
+    | .alias a name =>
+      if h : (name, T) ∈ Γ then
+        isTrue (by simp [checkSelectField, h])
+      else
+        isFalse (by simp [checkSelectField, h])
+
+instance (Γ : RelationType) (s : SelectField) (T : Typ) : Decidable (WellFormedSelectField Γ s T) :=
+  match s with
+  | .col name =>
+    if h : (name, T) ∈ Γ then
+      isTrue (WellFormedSelectField.col name h)
+    else
+      isFalse (fun hWf =>
+        match hWf with
+        | WellFormedSelectField.col _ h' => by contradiction)
+  | .alias a name =>
+    if h : (name, T) ∈ Γ then
+      isTrue (WellFormedSelectField.alias name h)
+    else
+      isFalse (fun hWf => match hWf with
+        | WellFormedSelectField.alias _ h' => by contradiction)
+
 def checkSel (Γ T : RelationType) (s : Select) : Option (Σ' T, WellFormedSelect Γ s T) := match s with
   | .all _ =>
     if h : ∀ x ∈ T, x ∈ Γ then
@@ -294,17 +345,10 @@ def checkSel (Γ T : RelationType) (s : Select) : Option (Σ' T, WellFormedSelec
       pure ⟨T, wsel⟩
     else
       .none
-  | .list d ss =>
-    let wellFormedFields := ss.all fun s =>
-      match checkSelectField Γ s sorry with
-      | some ⟨t, wf⟩ => true
-      | none => false
-    if wellFormedFields then
-      have h : ∀ s ∈ ss, WellFormedSelectField Γ s sorry :=
-        by
-          intro sf hsf
-          sorry
-      pure ⟨Γ, WellFormedSelect.list h⟩
+  | .list _ ss =>
+    let T : Typ := Typ.bigInt
+    if h : Forall (fun s : SelectField => WellFormedSelectField Γ s T) ss then
+      pure ⟨Γ, WellFormedSelect.list ss h⟩
     else
       .none
 

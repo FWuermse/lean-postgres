@@ -28,9 +28,10 @@ end Forall
 
 -- instance LawfulBEq
 inductive Typ
+  | integer
   | bigInt
   | bit
-  | bitVarying
+  | varbit
   | boolean
   | char
   | varchar
@@ -39,12 +40,12 @@ inductive Typ
   | double
   deriving BEq, DecidableEq
 
-instance : LawfulBEq Typ where
+  instance : LawfulBEq Typ where
   eq_of_beq := by
     intro a b hab
+    rw [BEq.beq] at hab <;>
     cases a <;>
     cases b <;>
-    rw [BEq.beq] at hab <;>
     try contradiction <;>
     rfl
     repeat rfl
@@ -56,6 +57,30 @@ instance : LawfulBEq Typ where
 abbrev RelationType := List (String × Typ)
 
 abbrev Schema := List (String × RelationType)
+
+inductive Value
+  | integer : Fin 4 → Value
+  | bigInt  : Fin 8 → Value
+  | bit  : Nat → Array Bool → Value
+  | varbit : Nat → Array Bool → Value
+  | boolean : Bool → Value
+  | char : Nat → String → Value
+  | varchar : Nat → String → Value
+  | date : Nat → Fin 13 → Fin 32 → Value
+  | real : Float → Value
+  | double : Float → Value -- TODO: alternatives?
+
+inductive WellFormedValue : Value → Typ → Prop
+  | integer : WellFormedValue (.integer i) .integer
+  | bigInt : WellFormedValue (.bigInt i) .bigInt
+  | bit : b.size = n → WellFormedValue (.bit n b) .bit
+  | bitVarying : b.size ≤ n → WellFormedValue (.varbit n b) .varbit
+  | boolean : WellFormedValue (.boolean b) .boolean
+  | char : s.length = n → WellFormedValue (.char n s) .char
+  | charVarying : s.length ≤ n → WellFormedValue (.varchar n s) .varchar
+  | date : m > 0 ∧ d > 0 → WellFormedValue (.date y m d) .date
+  | real : WellFormedValue (.real f) .real
+  | double : WellFormedValue (.double f) .double
 
 inductive Join
   | inner | left | right | outer
@@ -82,17 +107,19 @@ Ctx.fst represents the projections aka aliasing, Ctx.snd the result of a from cl
 field: name ∈ Ctx.fst ∨ name ∈ Ctx.snd
 -/
 inductive Aexpr
-  | value : Typ → Aexpr
+  | value : Value → Aexpr
   | field : String × Typ → Aexpr
 
 @[aesop unsafe 100% apply]
-inductive WellFormedAexpr : RelationType × RelationType → Aexpr → Type → Prop
-  | value :
+inductive WellFormedAexpr : RelationType × RelationType → Aexpr → Typ → Prop
+  | value v :
+    WellFormedValue v T →
     ----------------------------------
-    WellFormedAexpr Γ (.value v) Typ
-  | field : field ∈ Γ.fst ∨ field ∈ Γ.snd →
+    WellFormedAexpr Γ (.value v) T
+  | field :
+    (s, T) ∈ Γ.fst ∨ (s, T) ∈ Γ.snd →
     ----------------------------------
-    WellFormedAexpr Γ (.field n) Typ
+    WellFormedAexpr Γ (.field n) T
 
 inductive Aop
   | eq
@@ -102,21 +129,9 @@ inductive Aop
   | gt
   | ge
 
-def Aop.aop {α : Type} [DecidableEq α] [LT α] [DecidableRel (@LT.lt α _)] [LE α] [DecidableRel (@LE.le α _)] : Aop → (α → α → Bool)
-  | Aop.eq => (. == .)
-  | Aop.ne => (. != .)
-  | Aop.le => (. ≤ .)
-  | Aop.lt => (. < .)
-  | Aop.ge => (. ≥ .)
-  | Aop.gt => (. > .)
-
 inductive Bop
   | and
   | or
-
-def Bop.bop
-  | and => Bool.and
-  | or => Bool.or
 
 /-
 # Bexpr
@@ -140,24 +155,23 @@ inductive Bexpr
   | acmp : Aexpr → Aop → Aexpr → Bexpr
 
 @[aesop unsafe 100% apply]
-inductive WellFormedBexpr : (RelationType × RelationType) → Bexpr → Bool → Prop
-  | tt : WellFormedBexpr Γ .tt true
-  | ff : WellFormedBexpr Γ .ff false
+inductive WellFormedBexpr : (RelationType × RelationType) → Bexpr → Prop
+  | tt : WellFormedBexpr Γ .tt
+  | ff : WellFormedBexpr Γ .ff
   | not :
-    WellFormedBexpr Γ b T →
+    WellFormedBexpr Γ b →
     ----------------------------------
-    WellFormedBexpr Γ (.not b) T
+    WellFormedBexpr Γ (.not b)
   | bcmp :
-    WellFormedBexpr Γ b₁ T₁ →
-    WellFormedBexpr Γ b₂ T₂ →
+    WellFormedBexpr Γ b₁ →
+    WellFormedBexpr Γ b₂ →
     ----------------------------------
-    WellFormedBexpr Γ (.bcmp b₁ op b₂) T₃
+    WellFormedBexpr Γ (.bcmp b₁ op b₂)
   | acmp :
-    WellFormedAexpr Γ a₁ T₁ →
-    WellFormedAexpr Γ a₂ T₂ →
+    WellFormedAexpr Γ a₁ T →
+    WellFormedAexpr Γ a₂ T →
     ----------------------------------
-    WellFormedBexpr Γ (.acmp a₁ op a₂) T₃
-  -- TODO: case split over op in order to determine T₃ in relation to T₁, T₂?
+    WellFormedBexpr Γ (.acmp a₁ op a₂)
 
 /-
 # From
@@ -200,7 +214,7 @@ inductive WellFormedFrom : Schema → From → RelationType → Prop
   | join :
     WellFormedFrom Γ f₁ T₁ →
     WellFormedFrom Γ f₂ T₂ →
-    WellFormedBexpr (T₁, T₂) p _ →
+    WellFormedBexpr (T₁, T₂) p →
     WellFormedFrom Γ (.join j f₁ f₂ p) (T₁ ++ T₂)
   | implicitJoin :
     WellFormedFrom Γ f₁ T₁ →
@@ -287,17 +301,7 @@ structure Query where
 
 @[aesop unsafe 100% apply]
 inductive WellFormedQuery : Schema → Query → RelationType → Prop
-  | mk : WellFormedSelect Tf s Ts → WellFormedFrom Γ f Tf → WellFormedBexpr (Ts, Tf) b Tb → WellFormedQuery Γ ⟨s, f, b⟩ Ts
-
-example : WellFormedQuery [("myTable", [("MyField", .bigInt)])] ⟨.all false, .table "myTable", .tt⟩ [("MyField", Typ.bigInt)] := by
-  apply WellFormedQuery.mk
-  . apply WellFormedSelect.all
-    . simp
-      have h : ("MyField", .bigInt) ∈ [("MyField", Typ.bigInt)] := by simp
-      apply h
-  . apply WellFormedFrom.table "myTable"
-    . rw [List.mem_singleton]
-  . apply WellFormedBexpr.tt
+  | mk : WellFormedSelect Tf s Ts → WellFormedFrom Γ f Tf → WellFormedBexpr (Ts, Tf) b → WellFormedQuery Γ ⟨s, f, b⟩ Ts
 
 def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
   | .table name =>
@@ -370,6 +374,33 @@ def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellForm
     else
       .error "\tSelectError:\n\t\tll fields to be selected must occur in the selected tables."
 
+def checkValue (v : Value) : Except String (Σ' T, WellFormedValue v T) := match v with
+  | .integer _ => pure ⟨.integer, .integer⟩
+  | .bigInt _ => pure ⟨.bigInt, .bigInt⟩
+  | .bit n ba => if h : ba.size = n then
+      pure ⟨.bit, .bit h⟩
+    else
+      .error s!"\t\t\t\t ByteStream {ba} must have exactly length {n}"
+  | .varbit n ba => if h : ba.size ≤ n then
+      pure ⟨.varbit, .bitVarying h⟩
+    else
+      .error s!"\t\t\t\t ByteStream {ba} must not exceed length {n}"
+  | .boolean _ => pure ⟨.boolean, .boolean⟩
+  | .char n s => if h : s.length = n then
+      pure ⟨.char, .char h⟩
+    else
+      .error s!"\t\t\t\t String {s} must have exactly length {n}"
+  | .varchar n s => if h : s.length ≤ n then
+      pure ⟨.varchar, .charVarying h⟩
+    else
+      .error s!"\t\t\t\t ByteStream {s} must not exceed length {n}"
+  | .date y m d => if h : m > 0 ∧ d > 0 then
+      pure ⟨.date, .date h⟩
+    else
+      .error s!"\t\t\t\t Invalid date: {y}-{m}-{d}"
+  | .real _ => pure ⟨.real, .real⟩
+  | .double _ => pure ⟨.double, .double⟩
+
 def checkAexpr (Γ : RelationType × RelationType) (a : Aexpr) : Except String (Σ' T, WellFormedAexpr Γ a T) := match a with
   | .field (name, typ) =>
     if h : (name, typ) ∈ Γ.fst ∨ (name, typ) ∈ Γ.snd then
@@ -377,20 +408,29 @@ def checkAexpr (Γ : RelationType × RelationType) (a : Aexpr) : Except String (
       pure ⟨_, waexpr h⟩
     else
       .error s!"\t\tAExprError:\n\t\t\tThe field {name} is not present in this context."
-  | .value v => pure ⟨_, @WellFormedAexpr.value Γ v⟩
+  | .value v =>
+    match checkValue v with
+      | .ok ⟨T, hv⟩ =>
+          pure ⟨T, WellFormedAexpr.value v hv⟩
+      | .error e => .error s!"\t\tAExprError:\n{e}"
 
-def checkWhere (Γ : RelationType × RelationType) (w : Bexpr) : Except String (Σ' T, WellFormedBexpr Γ w T) :=
+def checkWhere (Γ : RelationType × RelationType) (w : Bexpr) : Except String (PLift $ WellFormedBexpr Γ w) :=
 match w with
-  | .tt => pure ⟨_, WellFormedBexpr.tt⟩
-  | .ff => pure ⟨_, WellFormedBexpr.ff⟩
-  | .not bexpr => (checkWhere Γ bexpr).map fun ⟨_, e⟩ => ⟨_, WellFormedBexpr.not e⟩
-  | .bcmp bexpr₁ bop bexpr₂ => do
-    let ⟨b₁, fst⟩ ← checkWhere Γ bexpr₁
-    let ⟨b₂, snd⟩ ← checkWhere Γ bexpr₂
-    pure ⟨bop.bop b₁ b₂, @WellFormedBexpr.bcmp Γ bexpr₁ b₁ bexpr₂ b₂ bop _ fst snd⟩
-  | .acmp aexpr₁ aop aexpr₂ => match checkAexpr Γ aexpr₁ with
+  | .tt => return PLift.up WellFormedBexpr.tt
+  | .ff => return PLift.up WellFormedBexpr.ff
+  | .not bexpr => match checkWhere Γ bexpr with
+    | .ok b => return PLift.up <| WellFormedBexpr.not b.down
+      | .error e => .error s!"\tWhereError:\n{e}"
+  | .bcmp bexpr₁ _ bexpr₂ => do
+    let fst ← checkWhere Γ bexpr₁
+    let snd ← checkWhere Γ bexpr₂
+    return PLift.up (WellFormedBexpr.bcmp fst.down snd.down)
+  | .acmp aexpr₁ _ aexpr₂ => match checkAexpr Γ aexpr₁ with
     | .ok ⟨a₁, fst⟩ => match checkAexpr Γ aexpr₂ with
-      | .ok ⟨a₂, snd⟩ => pure ⟨true, @WellFormedBexpr.acmp Γ aexpr₁ a₁ aexpr₂ a₂ aop _ fst snd⟩ -- TODO: replace true with actual comparison (if it's even required)
+      | .ok ⟨a₂, snd⟩ => if h : a₂ = a₁ then
+          return PLift.up (WellFormedBexpr.acmp fst (h ▸ snd))
+        else
+          .error s!"\tWhereError:\n\t\tOnly expressions of the same type can be compared."
       | .error e => .error s!"\tWhereError:\n{e}"
     | .error e => .error s!"\tWhereError:\n{e}"
 
@@ -413,9 +453,9 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T
   | .join _ frm₁ frm₂ prop => match checkFrom Γ T frm₁ with
     | .ok ⟨T₁, wfrm₁⟩ => match checkFrom Γ T frm₂ with
       | .ok ⟨T₂, wfrm₂⟩ => match checkWhere (T₁, T₂) prop with
-        | .ok ⟨_, prp⟩ =>
-            let wfrm := @WellFormedFrom.join _ Γ frm₁ T₁ frm₂ T₂ prop _ wfrm₁ wfrm₂
-            pure ⟨_, wfrm prp⟩
+        | .ok prp =>
+            let wfrm := WellFormedFrom.join wfrm₁ wfrm₂
+            pure ⟨_, wfrm prp.down⟩
         | .error e => .error s!"\tFromError:\n{e}"
       | .error e => .error s!"\tFromError:\n{e}"
     | .error e => .error s!"\tFromError:\n{e}"
@@ -427,9 +467,9 @@ def check (Γ : Schema) : (t : Query) → (T : RelationType) → Except String (
       | .ok fromTable => match checkFrom Γ fromTable frm with
         | .ok ⟨Tf, wfrm⟩ => match checkSel Tf T sel with
           | .ok ⟨Ts, wsel⟩ => match checkWhere (T, Tf) whr with
-            | .ok ⟨_, wwhr⟩ => do
+            | .ok wwhr => do
               if heq : Ts = T then
-                return PLift.up (.mk (Eq.subst heq wsel) wfrm wwhr)
+                return PLift.up (.mk (heq ▸ wsel) wfrm wwhr.down)
               else
                 .error s!"QueryError: Query type must match Select type."
             | .error e => .error s!"QueryError:\n{e}"

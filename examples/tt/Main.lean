@@ -100,15 +100,15 @@ instance : ToString Join := ⟨Join.toString⟩
 Typ
 
 ## Context Ctx
-RelationType × RelationType
-Ctx.fst represents the projections aka aliasing, Ctx.snd the result of a from clause
+RelationType × RelationType (contents of From/Select clauses or both tables in case of joins)
 
 ## Predicates
-field: name ∈ Ctx.fst ∨ name ∈ Ctx.snd
+value: WellFormedValue for type T
+field: (name, T) ∈ Ctx.fst ∨ (name, T) ∈ Ctx.snd
 -/
 inductive Aexpr
   | value : Value → Aexpr
-  | field : String × Typ → Aexpr
+  | field : String → Aexpr
 
 @[aesop unsafe 100% apply]
 inductive WellFormedAexpr : RelationType × RelationType → Aexpr → Typ → Prop
@@ -119,7 +119,7 @@ inductive WellFormedAexpr : RelationType × RelationType → Aexpr → Typ → P
   | field :
     (s, T) ∈ Γ.fst ∨ (s, T) ∈ Γ.snd →
     ----------------------------------
-    WellFormedAexpr Γ (.field n) T
+    WellFormedAexpr Γ (.field s) T
 
 inductive Aop
   | eq
@@ -137,10 +137,10 @@ inductive Bop
 # Bexpr
 
 ## Type T
-Bool
+Bool (implicit)
 
 ## Context Ctx
-(RelationType) × (RelationType)
+RelationType × RelationType (contents of From/Select clauses or both tables in case of joins)
 
 ## Predicates
 not: WellFormedBexpr
@@ -172,54 +172,6 @@ inductive WellFormedBexpr : (RelationType × RelationType) → Bexpr → Prop
     WellFormedAexpr Γ a₂ T →
     ----------------------------------
     WellFormedBexpr Γ (.acmp a₁ op a₂)
-
-/-
-# From
-
-## Type T
-RelationType
-
-## Context Ctx
-Schema
-
-## Predicates
-table: (name, T) ∈ Ctx
-alias: WellFormedFrom ∧ (alias, _) ∉ Ctx (maybe?)
-join/implicitJoin: WellFormedFrom₁ ∧ WellFormedFrom₂ ∧ T = a ++ b ∧ WellFormedProp
-nestedJoin: (_, Query) ∈ Ctx ∧ WellTypedQuery
--/
-inductive From where
-  | table        : (name : String) → From
-  | alias        : From → (as : String) → From
-  | join         : Join → From → From → Bexpr → From
-  | implicitJoin : From → From → From
-  -- | nestedJoin   : Query → From
-
-def From.toString
-  | table n => n
-  | «alias» f _ => f.toString
-  | join j f₁ f₂ _ => s!"{f₁.toString} {j} {f₂.toString}"
-  | implicitJoin f₁ f₂ => s!"{f₁.toString}, {f₂.toString}"
-
-instance : ToString From := ⟨From.toString⟩
-
-@[aesop unsafe 100% apply]
-inductive WellFormedFrom : Schema → From → RelationType → Prop
-  | table (n : String) :
-    (n, T) ∈ Γ →
-    WellFormedFrom Γ (.table n) T
-  | alias :
-    a → WellFormedFrom Γ f T →
-    WellFormedFrom Γ f' T
-  | join :
-    WellFormedFrom Γ f₁ T₁ →
-    WellFormedFrom Γ f₂ T₂ →
-    WellFormedBexpr (T₁, T₂) p →
-    WellFormedFrom Γ (.join j f₁ f₂ p) (T₁ ++ T₂)
-  | implicitJoin :
-    WellFormedFrom Γ f₁ T₁ →
-    WellFormedFrom Γ f₂ T₂ →
-    WellFormedFrom Γ (.implicitJoin f₁ f₂) (T₁ ++ T₂)
 
 /-
 # SelectField
@@ -260,8 +212,8 @@ RelationType
 RelationType
 
 ## Predicates
-list: distrinct → ∀ s ∈ List SelectFields, WellFormedSelectField
-all: (_, T) ∈ Ctx
+list: ∀ s ∈ List SelectFields, WellFormedSelectField s
+all: ∀ x ∈ T, x ∈ Γ
 -/
 inductive Select
   | list : Bool → List SelectField → Select
@@ -280,6 +232,29 @@ inductive WellFormedSelect : RelationType → Select → RelationType → Prop
     ----------------------------------
     WellFormedSelect Γ t T
 
+mutual
+/-
+# From
+
+## Type T
+RelationType
+
+## Context Ctx
+Schema
+
+## Predicates
+table: (name, T) ∈ Ctx
+alias: WellFormedFrom ∧ (alias, _) ∉ Ctx (maybe?)
+join/implicitJoin: WellFormedFrom₁ ∧ WellFormedFrom₂ ∧ T = a ++ b ∧ WellFormedProp
+nestedJoin: WellFormedQuery q
+-/
+inductive From where
+  | table        : (name : String) → From
+  | alias        : From → (as : String) → From
+  | join         : Join → From → From → Bexpr → From
+  | implicitJoin : From → From → From
+  | nestedJoin   : Query → From
+
 /-
 # Query
 
@@ -294,14 +269,46 @@ WellTyped Select in ctx
 WellTyped From in ctx
 WellTyped Where in ctx
 -/
-structure Query where
-  select   : Select
-  «from»   : From
-  «where»  : Bexpr
+inductive Query where
+  | mk : Select → From → Bexpr → Query
+end
+
+mutual
+@[aesop unsafe 100% apply]
+inductive WellFormedFrom : Schema → From → RelationType → Prop
+  | table (n : String) :
+    (n, T) ∈ Γ →
+    ----------------------------------
+    WellFormedFrom Γ (.table n) T
+  | alias :
+    WellFormedFrom Γ f T →
+    ----------------------------------
+    WellFormedFrom Γ (.alias f s) T
+  | join :
+    WellFormedFrom Γ f₁ T₁ →
+    WellFormedFrom Γ f₂ T₂ →
+    WellFormedBexpr (T₁, T₂) p →
+    ----------------------------------
+    WellFormedFrom Γ (.join j f₁ f₂ p) (T₁ ++ T₂)
+  | implicitJoin :
+    WellFormedFrom Γ f₁ T₁ →
+    WellFormedFrom Γ f₂ T₂ →
+    ----------------------------------
+    WellFormedFrom Γ (.implicitJoin f₁ f₂) (T₁ ++ T₂)
+  | nestedFrom :
+    WellFormedQuery Γ q T →
+    ----------------------------------
+    WellFormedFrom Γ (.nestedJoin q) T
 
 @[aesop unsafe 100% apply]
 inductive WellFormedQuery : Schema → Query → RelationType → Prop
-  | mk : WellFormedSelect Tf s Ts → WellFormedFrom Γ f Tf → WellFormedBexpr (Ts, Tf) b → WellFormedQuery Γ ⟨s, f, b⟩ Ts
+  | mk :
+    WellFormedSelect Tf s Ts →
+    WellFormedFrom Γ f Tf →
+    WellFormedBexpr (Ts, Tf) w →
+    ----------------------------------
+    WellFormedQuery Γ ⟨s, f, w⟩ Ts
+end
 
 def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
   | .table name =>
@@ -318,6 +325,15 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
     let fst ← getFromTable Γ frm₁
     let snd ← getFromTable Γ frm₂
     return fst ++ snd
+  | .nestedJoin (.mk s f _) => match s with
+    | .all _ => getFromTable Γ f
+    | .list _ l =>
+      return l.filterMap fun (sf : SelectField) =>
+        match getFromTable Γ f with
+          | .ok rt => match rt.find? (fun (n, _) => n == sf.name) with
+            | .some v => .some v
+            | .none => none
+          | .error _ => .none
 
 @[simp]
 def checkSelectField (Γ : RelationType) (s : SelectField) (T : Typ) : Except String (Σ' T, WellFormedSelectField Γ s T) := match s with
@@ -325,12 +341,12 @@ def checkSelectField (Γ : RelationType) (s : SelectField) (T : Typ) : Except St
     if h : (s, T) ∈ Γ then
       pure ⟨T, WellFormedSelectField.col s h⟩
     else
-      .error s!"\t\t\tSelected field {s} is not in the current context."
+      .error s!"Selected field {s} is not in the current context."
   | .alias a s =>
     if h : (s, T) ∈ Γ then
       pure ⟨T, WellFormedSelectField.alias s h⟩
     else
-      .error s!"\t\t\tSelected field {s} as {a} is not in the current context."
+      .error s!"Selected field {s} as {a} is not in the current context."
 
 instance (Γ : RelationType) (T : Typ) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isOk) :=
   fun s =>
@@ -366,13 +382,13 @@ def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellForm
       let wsel := WellFormedSelect.all h
       pure ⟨T, wsel⟩
     else
-      .error "\tSelectError:\n\t\tThe type of 'SELECT * ' must match the FROM clause."
+      .error "The type of `SELECT *` must match the FROM clause."
   | .list _ ss =>
     let T : Typ := Typ.bigInt
     if h : Forall (fun s : SelectField => WellFormedSelectField Γ s T) ss then
       pure ⟨Γ, WellFormedSelect.list ss h⟩
     else
-      .error "\tSelectError:\n\t\tll fields to be selected must occur in the selected tables."
+      .error "All fields to be selected must occur in the selected tables."
 
 def checkValue (v : Value) : Except String (Σ' T, WellFormedValue v T) := match v with
   | .integer _ => pure ⟨.integer, .integer⟩
@@ -380,99 +396,94 @@ def checkValue (v : Value) : Except String (Σ' T, WellFormedValue v T) := match
   | .bit n ba => if h : ba.size = n then
       pure ⟨.bit, .bit h⟩
     else
-      .error s!"\t\t\t\t ByteStream {ba} must have exactly length {n}"
+      .error s!"ByteStream {ba} must have exactly length {n}"
   | .varbit n ba => if h : ba.size ≤ n then
       pure ⟨.varbit, .bitVarying h⟩
     else
-      .error s!"\t\t\t\t ByteStream {ba} must not exceed length {n}"
+      .error s!"ByteStream {ba} must not exceed length {n}"
   | .boolean _ => pure ⟨.boolean, .boolean⟩
   | .char n s => if h : s.length = n then
       pure ⟨.char, .char h⟩
     else
-      .error s!"\t\t\t\t String {s} must have exactly length {n}"
+      .error s!"String {s} must have exactly length {n}"
   | .varchar n s => if h : s.length ≤ n then
       pure ⟨.varchar, .charVarying h⟩
     else
-      .error s!"\t\t\t\t ByteStream {s} must not exceed length {n}"
+      .error s!"String {s} must not exceed length {n}"
   | .date y m d => if h : m > 0 ∧ d > 0 then
       pure ⟨.date, .date h⟩
     else
-      .error s!"\t\t\t\t Invalid date: {y}-{m}-{d}"
+      .error s!"Invalid date: {y}-{m}-{d}"
   | .real _ => pure ⟨.real, .real⟩
   | .double _ => pure ⟨.double, .double⟩
 
 def checkAexpr (Γ : RelationType × RelationType) (a : Aexpr) : Except String (Σ' T, WellFormedAexpr Γ a T) := match a with
-  | .field (name, typ) =>
-    if h : (name, typ) ∈ Γ.fst ∨ (name, typ) ∈ Γ.snd then
-      let waexpr := WellFormedAexpr.field
-      pure ⟨_, waexpr h⟩
+  | .field name =>
+    let field := (Γ.fst.find? fun (n, _) => n == name).orElse fun _ => (Γ.snd.find? fun (n, _) => n == name)
+    if let .some (_, t) := field then
+      if h : (name, t) ∈ Γ.fst ∨ (name, t) ∈ Γ.snd then
+        let waexpr := WellFormedAexpr.field
+        pure ⟨t, waexpr h⟩
+      else
+        .error s!"The field {name} is not present in this context."
     else
-      .error s!"\t\tAExprError:\n\t\t\tThe field {name} is not present in this context."
-  | .value v =>
-    match checkValue v with
-      | .ok ⟨T, hv⟩ =>
-          pure ⟨T, WellFormedAexpr.value v hv⟩
-      | .error e => .error s!"\t\tAExprError:\n{e}"
+      .error s!"The field {name} is not present in this context."
+  | .value v => do
+    let ⟨T, hv⟩ ← checkValue v
+    pure ⟨T, .value v hv⟩
 
 def checkWhere (Γ : RelationType × RelationType) (w : Bexpr) : Except String (PLift $ WellFormedBexpr Γ w) :=
 match w with
-  | .tt => return PLift.up WellFormedBexpr.tt
-  | .ff => return PLift.up WellFormedBexpr.ff
-  | .not bexpr => match checkWhere Γ bexpr with
-    | .ok b => return PLift.up <| WellFormedBexpr.not b.down
-      | .error e => .error s!"\tWhereError:\n{e}"
+  | .tt => return PLift.up .tt
+  | .ff => return PLift.up .ff
+  | .not bexpr => do
+    let b ←  checkWhere Γ bexpr
+    return PLift.up <| .not b.down
   | .bcmp bexpr₁ _ bexpr₂ => do
     let fst ← checkWhere Γ bexpr₁
     let snd ← checkWhere Γ bexpr₂
-    return PLift.up (WellFormedBexpr.bcmp fst.down snd.down)
-  | .acmp aexpr₁ _ aexpr₂ => match checkAexpr Γ aexpr₁ with
-    | .ok ⟨a₁, fst⟩ => match checkAexpr Γ aexpr₂ with
-      | .ok ⟨a₂, snd⟩ => if h : a₂ = a₁ then
-          return PLift.up (WellFormedBexpr.acmp fst (h ▸ snd))
-        else
-          .error s!"\tWhereError:\n\t\tOnly expressions of the same type can be compared."
-      | .error e => .error s!"\tWhereError:\n{e}"
-    | .error e => .error s!"\tWhereError:\n{e}"
+    return PLift.up (.bcmp fst.down snd.down)
+  | .acmp aexpr₁ _ aexpr₂ => do
+    let ⟨a₁, fst⟩ ← checkAexpr Γ aexpr₁
+    let ⟨a₂, snd⟩ ← checkAexpr Γ aexpr₂
+    if h : a₂ = a₁ then
+      return PLift.up (.acmp fst (h ▸ snd))
+    else
+      .error "Only expressions of the same type can be compared."
 
+mutual
 def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T, WellFormedFrom Γ t T) := match t with
   | .table name =>
       if mem : (name, T) ∈ Γ then
-        let wfrm := WellFormedFrom.table name mem
+        let wfrm := .table name mem
         pure ⟨T, wfrm⟩
       else
-        .error s!"\tFromError:\n\t\table {name} not in Schema."
-  | .alias frm as =>
-    match checkFrom Γ T frm with
-      | .ok ⟨T, wfrm⟩ => pure ⟨T, WellFormedFrom.alias as wfrm⟩
-      | .error e => .error s!"\tFromError:\n{e}"
-  | .implicitJoin frm₁ frm₂ => match checkFrom Γ T frm₁ with
-      | .ok ⟨T₁, wfrm₁⟩ => match checkFrom Γ T frm₂ with
-        | .ok ⟨T₂, wfrm₂⟩ => .ok ⟨T₁++T₂, WellFormedFrom.implicitJoin wfrm₁ wfrm₂⟩
-        | .error e => .error s!"\tFromError:\n{e}"
-      | .error e => .error s!"\tFromError:\n{e}"
-  | .join _ frm₁ frm₂ prop => match checkFrom Γ T frm₁ with
-    | .ok ⟨T₁, wfrm₁⟩ => match checkFrom Γ T frm₂ with
-      | .ok ⟨T₂, wfrm₂⟩ => match checkWhere (T₁, T₂) prop with
-        | .ok prp =>
-            let wfrm := WellFormedFrom.join wfrm₁ wfrm₂
-            pure ⟨_, wfrm prp.down⟩
-        | .error e => .error s!"\tFromError:\n{e}"
-      | .error e => .error s!"\tFromError:\n{e}"
-    | .error e => .error s!"\tFromError:\n{e}"
+        .error s!"Table {name} not in Schema."
+  | .alias frm as => do
+      let ⟨T, wfrm⟩ ← checkFrom Γ T frm
+      pure ⟨T, .alias wfrm⟩
+  | .implicitJoin frm₁ frm₂ => do
+    let ⟨T₁, wfrm₁⟩ ← checkFrom Γ T frm₁
+    let ⟨T₂, wfrm₂⟩ ← checkFrom Γ T frm₂
+    pure ⟨T₁++T₂, .implicitJoin wfrm₁ wfrm₂⟩
+  | .join _ frm₁ frm₂ prop => do
+    let ⟨T₁, wfrm₁⟩ ← checkFrom Γ T frm₁
+    let ⟨T₂, wfrm₂⟩ ← checkFrom Γ T frm₂
+    let prp ← checkWhere (T₁, T₂) prop
+    let wfrm := WellFormedFrom.join wfrm₁ wfrm₂
+    pure ⟨_, wfrm prp.down⟩
+  | .nestedJoin q => do
+    let wqry ← check Γ q T
+    pure ⟨T, .nestedFrom wqry.down⟩
 
--- Lean error location at actual location (withRef combinators as part of AST Nodes)
 def check (Γ : Schema) : (t : Query) → (T : RelationType) → Except String (PLift (WellFormedQuery Γ t T))
-  | ⟨sel, frm, whr⟩, T =>
-    match getFromTable Γ frm with
-      | .ok fromTable => match checkFrom Γ fromTable frm with
-        | .ok ⟨Tf, wfrm⟩ => match checkSel Tf T sel with
-          | .ok ⟨Ts, wsel⟩ => match checkWhere (T, Tf) whr with
-            | .ok wwhr => do
-              if heq : Ts = T then
-                return PLift.up (.mk (heq ▸ wsel) wfrm wwhr.down)
-              else
-                .error s!"QueryError: Query type must match Select type."
-            | .error e => .error s!"QueryError:\n{e}"
-          | .error e => .error s!"QueryError:\n{e}"
-        | .error e => .error s!"QueryError:\n{e}"
-      | .error e => .error s!"QueryError:\n{e}"
+  | ⟨sel, frm, whr⟩, T => do
+    let fromTable ← getFromTable Γ frm
+    let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
+    let ⟨Ts, wsel⟩ ← checkSel Tf T sel
+    let wwhr ← checkWhere (T, Tf) whr
+    if heq : Ts = T then
+      return PLift.up (.mk (heq ▸ wsel) wfrm wwhr.down)
+    else
+      .error "Query type must match Select type."
+end

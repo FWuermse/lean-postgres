@@ -56,9 +56,9 @@ inductive DataType
     . rw [BEq.beq]
       cases h <;> rfl
 
-abbrev RelationDataTypee := List (String × DataType)
+abbrev RelationType := List (String × DataType)
 
-abbrev Schema := List (String × RelationDataTypee)
+abbrev Schema := List (String × RelationType)
 
 /-
 # Value
@@ -203,11 +203,11 @@ instance : ToString Operator :=
 
 Following the grammar of https://www.postgresql.org/docs/current/sql-expressions.html
 
-## DataTypee T
+## DataType T
 DataType
 
 ## Context Ctx
-RelationDataTypee × RelationDataTypee (contents of From/Select clauses or both tables in case of joins)
+RelationType × RelationType (contents of From/Select clauses or both tables in case of joins)
 -/
 inductive Expression
   | value (l : Value)
@@ -225,7 +225,7 @@ Following the comparison from:
   https://www.postgresql.org/docs/current/functions-comparison.html
   https://www.postgresql.org/docs/current/functions-datetime.html
 -/
-inductive WellFormedExpression : RelationDataTypee × RelationDataTypee → Expression → DataType → Prop
+inductive WellFormedExpression : RelationType × RelationType → Expression → DataType → Prop
   | value v :
     WellFormedValue v T →
     ----------------------------------
@@ -286,11 +286,11 @@ inductive WellFormedExpression : RelationDataTypee × RelationDataTypee → Expr
 /-
 # SelectField
 
-## DataTypee T
+## DataType T
 DataType
 
 ## Context Ctx
-RelationDataTypee
+RelationType
 
 ## Predicates
 (name, _) ∈ Ctx
@@ -307,7 +307,7 @@ def SelectField.name
   | col s => s
   | «alias» _ s => s
 
-inductive WellFormedSelectField : RelationDataTypee → SelectField → DataType → Prop
+inductive WellFormedSelectField : RelationType → SelectField → DataType → Prop
   | col (n : String) :
     (n, T) ∈ Γ →
     WellFormedSelectField Γ (.col n) T
@@ -318,11 +318,11 @@ inductive WellFormedSelectField : RelationDataTypee → SelectField → DataType
 /-
 # Select
 
-## DataTypee T
-RelationDataTypee
+## DataType T
+RelationType
 
 ## Context Ctx
-RelationDataTypee
+RelationType
 
 ## Predicates
 list: ∀ s ∈ List SelectFields, WellFormedSelectField s
@@ -336,7 +336,7 @@ inductive Select
 TODO: support for functions such as count etc.
 -/
 @[aesop unsafe 100% apply]
-inductive WellFormedSelect : RelationDataTypee → Select → RelationDataTypee → Prop
+inductive WellFormedSelect : RelationType → Select → RelationType → Prop
   | list (ss : List SelectField) :
     Forall (∃t, WellFormedSelectField Γ . t) ss →
     ----------------------------------
@@ -349,8 +349,8 @@ mutual
 /-
 # From
 
-## DataTypee T
-RelationDataTypee
+## DataType T
+RelationType
 
 ## Context Ctx
 Schema
@@ -372,23 +372,23 @@ inductive From where
 /-
 # Query
 
-## DataTypee T
-RelationDataTypee
+## DataType T
+RelationType
 
 ## Context Ctx
 Schema
 
 ## Predicates
-WellDataTypeed Select in ctx
-WellDataTypeed From in ctx
-WellDataTypeed Where in ctx
+WellDataTyped Select in ctx
+WellDataTyped From in ctx
+WellDataTyped Where in ctx
 -/
 inductive Query where
   | mk : Select → From → BExpr → Query
 end
 
 @[aesop unsafe 100% apply]
-inductive WellFormedFrom : Schema → From → RelationDataTypee → Prop
+inductive WellFormedFrom : Schema → From → RelationType → Prop
   | table (n : String) :
     (n, T) ∈ Γ →
     ----------------------------------
@@ -416,7 +416,7 @@ inductive WellFormedFrom : Schema → From → RelationDataTypee → Prop
     WellFormedFrom Γ (.nestedJoin s f e) Ts
 
 @[aesop unsafe 100% apply]
-inductive WellFormedQuery : Schema → Query → RelationDataTypee → Prop
+inductive WellFormedQuery : Schema → Query → RelationType → Prop
   | mk :
     WellFormedSelect Tf s Ts →
     WellFormedFrom Γ f Tf →
@@ -424,7 +424,7 @@ inductive WellFormedQuery : Schema → Query → RelationDataTypee → Prop
     ----------------------------------
     WellFormedQuery Γ ⟨s, f, w⟩ Ts
 
-def getFromTable (Γ : Schema) : (t : From) → Except String RelationDataTypee
+def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
   | .table name =>
     let table := Γ.find? fun (n, _) => n == name
     match table with
@@ -450,7 +450,7 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationDataTypee
           | .error _ => .none
 
 @[simp]
-def checkSelectField (Γ : RelationDataTypee) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) := match s with
+def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) := match s with
   | .col s => do
     if h : (s, T) ∈ Γ then
       pure ⟨T, WellFormedSelectField.col s h⟩
@@ -463,7 +463,7 @@ def checkSelectField (Γ : RelationDataTypee) (s : SelectField) (T : DataType) :
       .error s!"Selected field {s} as {a} is not in the current context."
 
 -- (Maybe remove dicidable)
-instance (Γ : RelationDataTypee) (T : DataType) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isOk) :=
+instance (Γ : RelationType) (T : DataType) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isOk) :=
   fun s =>
     match s with
     | .col name =>
@@ -477,27 +477,79 @@ instance (Γ : RelationDataTypee) (T : DataType) : DecidablePred (fun s : Select
       else
         isFalse (by simp [h]; rfl)
 
-instance (Γ : RelationDataTypee) (s : SelectField) (T : DataType) : Decidable (∃T, WellFormedSelectField Γ s T) := match s with
+instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSelectField Γ s T) := match s with
   | .col name =>
-    if h : (name, T) ∈ Γ then
-      isTrue (by apply Exists.intro; apply WellFormedSelectField.col name h)
-    else
-      isFalse (sorry)
+      match hfind : Γ.find? fun (n, _) => n = name with
+        | .some (n, T) =>
+          isTrue (by
+            apply Exists.intro
+            have hmem : (name, T) ∈ Γ :=
+              by
+                simp at hfind
+                have h_eq : n = name := (by
+                  have h' := List.find?_some hfind
+                  simp [eq_true_of_decide h'])
+                apply List.mem_of_find?_eq_some
+                . exact h_eq ▸ hfind
+            apply WellFormedSelectField.col name hmem)
+        | .none => isFalse (by
+          simp [not_exists]
+          intro dt
+          simp [*] at *
+          have h_neq : (name, dt) ∉ Γ  := (by
+            simp [List.find?_eq_none] at hfind
+            intro hmem
+            have h'' := hfind (name, dt) hmem
+            rw [Not] at h''
+            apply h''
+            rfl
+            )
+          rw [Not] at *
+          intro wfsf
+          cases wfsf
+          apply h_neq
+          assumption)
   | .alias a name =>
-    if h : (name, T) ∈ Γ then
-      isTrue (by apply Exists.intro; apply WellFormedSelectField.alias name h)
-    else
-      isFalse (sorry)
+      match hfind : Γ.find? fun (n, _) => n = name with
+        | .some (n, T) =>
+          isTrue (by
+            apply Exists.intro
+            have hmem : (name, T) ∈ Γ :=
+              by
+                simp at hfind
+                have h_eq : n = name := (by
+                  have h' := List.find?_some hfind
+                  simp [eq_true_of_decide h'])
+                apply List.mem_of_find?_eq_some
+                . exact h_eq ▸ hfind
+            apply WellFormedSelectField.alias name hmem)
+        | .none => isFalse (by
+          simp [not_exists]
+          intro dt
+          simp [*] at *
+          have h_neq : (name, dt) ∉ Γ  := (by
+            simp [List.find?_eq_none] at hfind
+            intro hmem
+            have h'' := hfind (name, dt) hmem
+            rw [Not] at h''
+            apply h''
+            rfl
+            )
+          rw [Not] at *
+          intro wfsf
+          cases wfsf
+          apply h_neq
+          assumption)
 
-def checkSel (Γ T : RelationDataTypee) (s : Select) : Except String (Σ' T, WellFormedSelect Γ s T) := match s with
+def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellFormedSelect Γ s T) := match s with
   | .all _ =>
     if h : ∀ x ∈ T, x ∈ Γ then
       let wsel := WellFormedSelect.all h
       pure ⟨T, wsel⟩
     else
       .error "The type of `SELECT *` must match the FROM clause."
-  | .list _ ss =>
-    if h : Forall (fun s : SelectField => ∃T, WellFormedSelectField Γ s T) ss then
+  | .list _ ss => do
+    if h: Forall (fun s : SelectField => ∃ T, WellFormedSelectField Γ s T) ss then
       pure ⟨Γ, WellFormedSelect.list ss h⟩
     else
       .error "All fields to be selected must occur in the selected tables."
@@ -553,7 +605,7 @@ def checkNumConv (fst : DataType) (snd : DataType) : Except String (Σ' T, WellF
   else
     .error s!"Types are not comparable"
 
-def checkExpression (Γ : RelationDataTypee × RelationDataTypee) (e : Expression) : Except String (Σ' T, WellFormedExpression Γ e T) := match e with
+def checkExpression (Γ : RelationType × RelationType) (e : Expression) : Except String (Σ' T, WellFormedExpression Γ e T) := match e with
   | .value <| .boolean true => pure ⟨.boolean, .tt⟩
   | .value <| .boolean false => pure ⟨.boolean, .ff⟩
   | .value v => do
@@ -594,7 +646,7 @@ def checkExpression (Γ : RelationDataTypee × RelationDataTypee) (e : Expressio
       .error "Only expressions of a comparable type can be compared."
 
 mutual
-def checkFrom (Γ : Schema) (T : RelationDataTypee) (t : From) : Except String (Σ' T, WellFormedFrom Γ t T) := match t with
+def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T, WellFormedFrom Γ t T) := match t with
   | .table name =>
       if mem : (name, T) ∈ Γ then
         let wfrm := .table name mem
@@ -618,7 +670,7 @@ def checkFrom (Γ : Schema) (T : RelationDataTypee) (t : From) : Except String (
     let wqry ← checkQuery Γ q T
     pure ⟨T, .nestedFrom wqry.down⟩
 
-def checkQuery (Γ : Schema) : (t : Query) → (T : RelationDataTypee) → Except String (PLift (WellFormedQuery Γ t T))
+def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except String (PLift (WellFormedQuery Γ t T))
   | ⟨sel, frm, whr⟩, T => do
     let fromTable ← getFromTable Γ frm
     let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm

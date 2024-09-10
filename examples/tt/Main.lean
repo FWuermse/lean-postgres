@@ -363,8 +363,8 @@ inductive SelectField
   deriving BEq, DecidableEq, Repr
 
 def SelectField.toString
-  | col n t => s!"{n}.{t}"
-  | alias n t a => s!"{n}.{t} AS {a}"
+  | col n t => s!"{t}.{n}"
+  | alias n t a => s!"{t}.{n} AS {a}"
 
 def SelectField.name
   | col n t => s!"{t}.{n}"
@@ -524,9 +524,9 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
     match table with
       | .some (_, t) => .ok t
       | .none => .error s!"Could not find table {name}"
-  | .alias frm _ => do
+  | .alias frm a => do
     let rt ← getFromTable Γ frm
-    return rt
+    return rt.map fun (n, _, T) => (n, a, T)
   | .implicitJoin frm₁ frm₂ => do
     let fst ← getFromTable Γ frm₁
     let snd ← getFromTable Γ frm₂
@@ -537,18 +537,10 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
     return fst ++ snd
   | .nestedJoin s f _ a => match s with
     | .all _ => getFromTable Γ f
-    | .list _ l =>
-      let res := l.filterMap fun (sf : SelectField) =>
-        match getFromTable Γ f with
-          | .ok rt => match sf with
-            | .col n t => match rt.find? fun (n', t', _) => n == n' && t == t' with
-              | .some v => .some v
-              | .none => none
-            | .alias n t a => match rt.find? fun (n', t', _) => n == n' && t == t' with
-              | .some v => .some {v with fst := a}
-              | .none => none
-          | .error _ => .none
-      return res
+    | .list _ ss => do
+      let fromTable ← getFromTable Γ f
+      let res := ss.filterMap (fun s => SelectField.getTuple fromTable s)
+      return res.map fun (n, _, T) => (n, a, T)
 
 @[simp]
 def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) := match s with
@@ -650,10 +642,7 @@ def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellForm
   | .list _ ss => do
     let T := ss.filterMap fun s => SelectField.getTuple Γ s
     if h : Forall (fun s : SelectField => ∃ t, WellFormedSelectField Γ s t) ss then
-      if h' : T = ss.filterMap (fun s => SelectField.getTuple Γ s) then
-        pure ⟨T, WellFormedSelect.list ss h h'⟩
-      else
-        .error s!"Selection Type {T} must have length of selectFields: {ss.length}."
+      pure ⟨T, WellFormedSelect.list ss h rfl⟩
     else
       .error s!"All selected fields {ss} must be well formed in the context {Γ}."
 
@@ -807,7 +796,7 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T
     else
       .error s!"Table {name} : {T} not in Schema {Γ}."
   | .alias frm a => do
-    let ⟨T, wfrm⟩ ← checkFrom Γ T frm
+    let ⟨T, wfrm⟩ ← checkFrom Γ (← getFromTable Γ frm) frm
     pure ⟨T.map fun (n, _, ty) => (n, a, ty), .alias wfrm rfl⟩
   | .implicitJoin frm₁ frm₂ => do
     let ⟨T₁, wfrm₁⟩ ← checkFrom Γ (← getFromTable Γ frm₁) frm₁
@@ -825,10 +814,10 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T
   | .nestedJoin sel frm whr a => do
     let fromTable ← getFromTable Γ frm
     let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
-    let ⟨Ts, wsel⟩ ← checkSel Tf T sel
+    let ⟨Ts, wsel⟩ ← checkSel Tf fromTable sel
     let wwhr ← checkExpression Tf whr
-    if heq : Ts = T ∧ wwhr.fst = .boolean then
-      return ⟨T.map fun (n, _, ty) => (n, a, ty), .nestedFrom (heq.left ▸ wsel) wfrm (heq.right ▸ wwhr.snd) rfl⟩
+    if heq : T = (Ts.map fun (n, _, ty) => (n, a, ty)) ∧ wwhr.fst = .boolean then
+      return ⟨T, .nestedFrom (wsel) wfrm (heq.right ▸ wwhr.snd) heq.left⟩
     else
       .error s!"Query type {T} must match Select {Ts} type."
 
@@ -999,7 +988,7 @@ def elabSelectField (Γ : RelationType) (stx : TSyntax `selectField) : TermElabM
   let (expr, sf) ← match stx with
     | `(selectField|$field:ident) =>
       match field.getId with
-        | .str fst snd =>
+        | .str fst snd => do
           pure (mkApp2 (mkConst ``SelectField.col) (mkStrLit snd) (mkStrLit fst.toString), .col snd fst.toString)
         | _ => throwUnsupportedSyntax
     | `(selectField|$field:ident AS $as:ident) => do
@@ -1012,7 +1001,8 @@ def elabSelectField (Γ : RelationType) (stx : TSyntax `selectField) : TermElabM
         | _ => throwUnsupportedSyntax
     | _ => throwUnsupportedSyntax
   match (SelectField.getTuple Γ sf) with
-    | .some (_, _, T) => match checkSelectField Γ sf T with
+    | .some (_, _, T) =>
+      match checkSelectField Γ sf T with
       | .ok ⟨_T, _p⟩ => pure (expr, sf)
       | .error e => throwErrorAt stx e
     | .none => throwErrorAt stx "Field {sf} not in Context {Γ}"
@@ -1080,14 +1070,15 @@ partial def elabFrom (Γ : Schema) : TSyntax `sqlFrom → TermElabM (Expr × Fro
   | `(sqlFrom| (SELECT $sel:sqlSelect FROM $frm:sqlFrom $[WHERE $expr]?) AS $id:ident) => do
     let (frme, frm') ← elabFrom Γ frm
     let fromTable := getFromTable Γ frm'
+    let al := id.getId.toString
       match fromTable with
         | .ok fromTable =>
-          let (whre, whr) ← match expr with
+          let (whre, whr') ← match expr with
             | none => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), Expression.value (.boolean true))
             | some expr => elabExpression fromTable expr
             -- TODO: how to infer inner sel type?
-          let (sele, sel, _) ← elabSelect fromTable fromTable sel
-          pure (mkApp4 (mkConst ``From.nestedJoin) sele frme whre (mkStrLit id.getId.toString), .nestedJoin sel frm' whr id.getId.toString)
+          let (sele, sel', T) ← elabSelect fromTable (fromTable.map fun (n, _, T) => (n, al, T)) sel
+          pure (mkApp4 (mkConst ``From.nestedJoin) sele frme whre (mkStrLit al), .nestedJoin sel' frm' whr' al)
         | .error e => throwErrorAt frm e
     | _ => throwUnsupportedSyntax
 
@@ -1196,5 +1187,5 @@ def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer"
 #check schema |- SELECT customer.id FROM customer WHERE (8 + customer.date) > customer.date ∶ [("id", "customer", DataType.bigInt)]
 -- Should succeed on double dot alias ✓
 #check schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a ∶ [("a", "a.a", DataType.bigInt)]
--- Should nest deeply × (TODO: how to infer inner sel type?)
+-- Should nest deeply ✓
 #check schema |- SELECT a.id FROM (SELECT b.id FROM (SELECT customer.id FROM customer) AS b) AS a ∶ [("id", "a", DataType.bigInt)]

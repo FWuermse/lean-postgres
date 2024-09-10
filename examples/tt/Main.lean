@@ -524,7 +524,7 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
     match table with
       | .some (_, t) => .ok t
       | .none => .error s!"Could not find table {name}"
-  | .alias frm a => do
+  | .alias frm _ => do
     let rt ← getFromTable Γ frm
     return rt
   | .implicitJoin frm₁ frm₂ => do
@@ -862,20 +862,20 @@ syntax "DISTINCT " "*"              : sqlSelect
 syntax selectField,+                : sqlSelect
 syntax "DISTINCT " selectField,+    : sqlSelect
 
-declare_syntax_cat                    propSymbol
-syntax " = "                        : propSymbol
-syntax " <> "                       : propSymbol
-syntax " != "                       : propSymbol
-syntax " < "                        : propSymbol
-syntax " <= "                       : propSymbol
-syntax " > "                        : propSymbol
-syntax " >= "                       : propSymbol
-syntax " + "                        : propSymbol
-syntax " - "                        : propSymbol
-syntax " / "                        : propSymbol
-syntax " * "                        : propSymbol
-syntax " % "                        : propSymbol
-syntax " || "                       : propSymbol
+declare_syntax_cat                    op
+syntax " = "                        : op
+syntax " <> "                       : op
+syntax " != "                       : op
+syntax " < "                        : op
+syntax " <= "                       : op
+syntax " > "                        : op
+syntax " >= "                       : op
+syntax " + "                        : op
+syntax " - "                        : op
+syntax " / "                        : op
+syntax " * "                        : op
+syntax " % "                        : op
+syntax " || "                       : op
 
 declare_syntax_cat                    expr
 syntax "TRUE"                       : expr
@@ -884,7 +884,7 @@ syntax value                        : expr
 syntax ident                        : expr
 syntax:65 "+" expr:66               : expr
 syntax:65 "-" expr:66               : expr
-syntax:64 expr:65 propSymbol expr:65: expr
+syntax:64 expr:65 op expr:65        : expr
 syntax:63 expr " AND " expr         : expr
 syntax:63 expr " OR "  expr         : expr
 syntax:63 " NOT " expr              : expr
@@ -911,12 +911,6 @@ syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " expr)? : sqlQuery
 
 syntax (name := pgquery) ident " |- " sqlQuery " ∶ " term : term
 
-def mkApp' (name : Name) (e : Expr) : Expr :=
-  mkApp (mkConst name) e
-
-def negFloat (f : Float) : Float :=
-  -1.0 * f
-
 def fl : Nat × Bool × Nat → Float
   | (c, b, e) =>
     let sign := if b then -1.0 else 1.0
@@ -938,25 +932,26 @@ partial def elabValue (stx : TSyntax `value) : TermElabM (Expr × Value) := do
     | `(value|NULL)              => pure (Lean.mkConst ``Value.null, .null)
     | `(value|($v:value))        => elabValue v
     | _                          => throwUnsupportedSyntax
+    -- TODO: Include remaining types
   match checkValue val with
     | .ok ⟨_T, _p⟩ => pure (expr, val)
     | .error e => throwErrorAt stx e
 
-def elabPropSymbol (stx : TSyntax `propSymbol) : TermElabM (Expr × Operator) :=
+def elabOp (stx : TSyntax `op) : TermElabM (Expr × Operator) :=
   match stx with
-  | `(propSymbol|=)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.eq), .acop .eq)
-  | `(propSymbol|<>) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne), .acop .ne)
-  | `(propSymbol|!=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne), .acop .ne)
-  | `(propSymbol|<)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.lt), .acop .lt)
-  | `(propSymbol|<=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.le), .acop .le)
-  | `(propSymbol|>)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.gt), .acop .gt)
-  | `(propSymbol|>=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ge), .acop .ge)
-  | `(propSymbol|+) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.add), .aop .add)
-  | `(propSymbol|-) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.sub), .aop .sub)
-  | `(propSymbol|/) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.div), .aop .div)
-  | `(propSymbol|*) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mul), .aop .mul)
-  | `(propSymbol|%) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mod), .aop .mod)
-  | `(propSymbol|||) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.con), .aop .con)
+  | `(op|=)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.eq), .acop .eq)
+  | `(op|<>) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne), .acop .ne)
+  | `(op|!=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne), .acop .ne)
+  | `(op|<)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.lt), .acop .lt)
+  | `(op|<=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.le), .acop .le)
+  | `(op|>)  => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.gt), .acop .gt)
+  | `(op|>=) => pure (mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ge), .acop .ge)
+  | `(op|+) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.add), .aop .add)
+  | `(op|-) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.sub), .aop .sub)
+  | `(op|/) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.div), .aop .div)
+  | `(op|*) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mul), .aop .mul)
+  | `(op|%) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mod), .aop .mod)
+  | `(op|||) => pure (mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.con), .aop .con)
   | _                => throwUnsupportedSyntax
 
 -- Can be optimized by checking in the branches rather than at the end
@@ -983,10 +978,10 @@ partial def elabExpression (T : RelationType) (stx : TSyntax `expr) : TermElabM 
       let (ae₁, aee₁) ← elabExpression T be₁
       let (ae₂, aee₂) ← elabExpression T be₂
       pure (mkApp3 (mkConst ``Expression.bin) ae₁ (mkApp (mkConst ``Operator.bop) (mkConst ``BoolBinOp.or)) ae₂, .bin aee₁ (.bop .and) aee₂)
-    | `(expr|$ae₁:expr $ps:propSymbol $ae₂:expr) => do
+    | `(expr|$ae₁:expr $ps:op $ae₂:expr) => do
       let (ae₁, aee₁) ← elabExpression T ae₁
       let (ae₂, aee₂) ← elabExpression T ae₂
-      let (oexpr, op) ← elabPropSymbol ps
+      let (oexpr, op) ← elabOp ps
       pure (mkApp3 (mkConst ``Expression.bin) ae₁ oexpr ae₂, .bin aee₁ op aee₂)
     | `(expr|($be:expr)) => elabExpression T be
     | `(expr|TRUE) => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), .value (.boolean true))
@@ -1035,9 +1030,9 @@ def elabSelect (Γ T : RelationType) (stx : TSyntax `sqlSelect) : TermElabM (Exp
       let cols ← mkListLit (mkConst ``SelectField) exprs
       pure (mkApp2 (mkConst ``Select.list) (mkConst ``Bool.false) cols, .list false sfs)
     | `(sqlSelect|DISTINCT $cs:selectField,*) => do
-      let l ← cs.getElems.toList.mapM (elabSelectField Γ)
-      let exprs := l.map fun (e, _) => e
-      let sfs := l.map fun (_, sf) => sf
+      let sfzip ← cs.getElems.toList.mapM (elabSelectField Γ)
+      let exprs := sfzip.map fun (e, _) => e
+      let sfs := sfzip.map fun (_, sf) => sf
       let cols ← mkListLit (mkConst ``SelectField) exprs
       pure (mkApp2 (mkConst ``Select.list) (mkConst ``Bool.true) cols, .list false sfs)
     | _ => throwUnsupportedSyntax
@@ -1058,44 +1053,46 @@ def elabJoin : TSyntax `join → TermElabM (Expr × Join)
 def throwUnsupportedLocalSyntax {α : Type} {stx : Syntax} : TermElabM α :=
   throwErrorAt stx "unexpected syntax\n{stx}"
 
--- Can be optimized by checking in the branches rather than at the end
-partial def elabFrom (Γ : Schema) (stx : TSyntax `sqlFrom) : TermElabM (Expr × From × RelationType) := do
-  let (expr, frm) ← match stx with
-    | `(sqlFrom|$t:ident)               =>
-      pure (mkApp (mkConst ``From.table) (mkStrLit t.getId.toString), .table t.getId.toString)
-    | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
-      let (fre, fr, _) ← elabFrom Γ f
-      pure (mkApp2  (mkConst ``From.alias) fre (mkStrLit t.getId.toString), .alias fr t.getId.toString)
-    | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
-      let (fre₁, fr₁, _) ← elabFrom Γ l
-      let (fre₂, fr₂, _) ← elabFrom Γ r
-      pure (mkApp2 (mkConst ``From.implicitJoin) fre₁ fre₂, .implicitJoin fr₁ fr₂)
-    | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:expr) => do
-      let (fre₁, fr₁, _) ← elabFrom Γ l
-      let (fre₂, fr₂, _) ← elabFrom Γ r
-      let (joe, jo) ← elabJoin j
-      match getFromTable Γ fr₁ with
-        | .ok T₁ => match getFromTable Γ fr₂ with
-          | .ok T₂ =>
-              let (exe, ex) ← elabExpression (T₁++T₂) p
-              pure (mkApp4 (mkConst ``From.join) joe fre₁ fre₂ exe, .join jo fr₁ fr₂ ex)
-          | .error e => throwErrorAt r e
-        | .error e => throwErrorAt l e
-    | `(sqlFrom|($f:sqlFrom))           => do
-      let (frme, frm, _) ← elabFrom Γ f
-      pure (frme, frm)
-    | `(sqlFrom| (SELECT $sel:sqlSelect FROM $frm:sqlFrom $[WHERE $expr]?) AS $id:ident) => do
-      let (frme, frm', _) ← elabFrom Γ frm
-      let fromTable := getFromTable Γ frm'
+partial def elabFrom (Γ : Schema) : TSyntax `sqlFrom → TermElabM (Expr × From)
+  | `(sqlFrom|$t:ident)               =>
+    pure (mkApp (mkConst ``From.table) (mkStrLit t.getId.toString), .table t.getId.toString)
+  | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
+    let (fre, fr) ← elabFrom Γ f
+    pure (mkApp2  (mkConst ``From.alias) fre (mkStrLit t.getId.toString), .alias fr t.getId.toString)
+  | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
+    let (fre₁, fr₁) ← elabFrom Γ l
+    let (fre₂, fr₂) ← elabFrom Γ r
+    pure (mkApp2 (mkConst ``From.implicitJoin) fre₁ fre₂, .implicitJoin fr₁ fr₂)
+  | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:expr) => do
+    let (fre₁, fr₁) ← elabFrom Γ l
+    let (fre₂, fr₂) ← elabFrom Γ r
+    let (joe, jo) ← elabJoin j
+    match getFromTable Γ fr₁ with
+      | .ok T₁ => match getFromTable Γ fr₂ with
+        | .ok T₂ =>
+            let (exe, ex) ← elabExpression (T₁++T₂) p
+            pure (mkApp4 (mkConst ``From.join) joe fre₁ fre₂ exe, .join jo fr₁ fr₂ ex)
+        | .error e => throwErrorAt r e
+      | .error e => throwErrorAt l e
+  | `(sqlFrom|($f:sqlFrom))           => do
+    let (frme, frm) ← elabFrom Γ f
+    pure (frme, frm)
+  | `(sqlFrom| (SELECT $sel:sqlSelect FROM $frm:sqlFrom $[WHERE $expr]?) AS $id:ident) => do
+    let (frme, frm') ← elabFrom Γ frm
+    let fromTable := getFromTable Γ frm'
       match fromTable with
         | .ok fromTable =>
           let (whre, whr) ← match expr with
             | none => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), Expression.value (.boolean true))
             | some expr => elabExpression fromTable expr
+            -- TODO: how to infer inner sel type?
           let (sele, sel, _) ← elabSelect fromTable fromTable sel
           pure (mkApp4 (mkConst ``From.nestedJoin) sele frme whre (mkStrLit id.getId.toString), .nestedJoin sel frm' whr id.getId.toString)
         | .error e => throwErrorAt frm e
     | _ => throwUnsupportedSyntax
+
+def elabCheckedFrom (Γ : Schema) (stx : TSyntax `sqlFrom) : TermElabM (Expr × From × RelationType) := do
+  let (expr, frm) ← elabFrom Γ stx
   match getFromTable Γ frm with
     | .ok Tf => do
       match checkFrom Γ Tf frm with
@@ -1103,10 +1100,10 @@ partial def elabFrom (Γ : Schema) (stx : TSyntax `sqlFrom) : TermElabM (Expr ×
       | .error e => throwErrorAt stx e
     | .error e => throwErrorAt stx e
 
-partial def elabQuery (Γ : Schema) (T : RelationType) (stx : TSyntax `sqlQuery) : TermElabM Expr := do
+def elabQuery (Γ : Schema) (T : RelationType) (stx : TSyntax `sqlQuery) : TermElabM Expr := do
   let (expr, query, Ts) ← match stx with
     | `(sqlQuery| SELECT $sel FROM $frm:sqlFrom $[WHERE $expr]?) =>
-      let (frme, frm', Tf) ← elabFrom Γ frm
+      let (frme, frm', Tf) ← elabCheckedFrom Γ frm
       let (whre, whr) ← match expr with
         | none     => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), .value (.boolean true))
         | some expr => elabExpression Tf expr
@@ -1117,11 +1114,7 @@ partial def elabQuery (Γ : Schema) (T : RelationType) (stx : TSyntax `sqlQuery)
     | .ok ⟨_, _⟩ => pure expr
     | .error e => throwErrorAt stx e
 
-def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : CoreM RelationType :=
-  match checkQuery Γ t T with
-    | .ok _ => pure T
-    | .error e => throwError e
-
+-- TODO add remaining Values
 def exprToDataType : Expr → TermElabM DataType
   | .const ``DataType.bigInt _ => pure .bigInt
   | .const ``DataType.integer _ => pure .integer
@@ -1203,5 +1196,5 @@ def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer"
 #check schema |- SELECT customer.id FROM customer WHERE (8 + customer.date) > customer.date ∶ [("id", "customer", DataType.bigInt)]
 -- Should succeed on double dot alias ✓
 #check schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a ∶ [("a", "a.a", DataType.bigInt)]
--- Should nest deeply
+-- Should nest deeply × (TODO: how to infer inner sel type?)
 #check schema |- SELECT a.id FROM (SELECT b.id FROM (SELECT customer.id FROM customer) AS b) AS a ∶ [("id", "a", DataType.bigInt)]

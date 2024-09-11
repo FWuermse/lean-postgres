@@ -536,7 +536,9 @@ def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
     let snd ← getFromTable Γ frm₂
     return fst ++ snd
   | .nestedJoin s f _ a => match s with
-    | .all _ => getFromTable Γ f
+    | .all _ => do
+      let fromTable ← getFromTable Γ f
+      return fromTable.map fun (n, _, T) => (n, a, T)
     | .list _ ss => do
       let fromTable ← getFromTable Γ f
       let res := ss.filterMap (fun s => SelectField.getTuple fromTable s)
@@ -638,7 +640,7 @@ def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellForm
       let wsel := WellFormedSelect.all h
       pure ⟨T, wsel⟩
     else
-      .error s!"The type of `SELECT *` must match the FROM clause {Γ}."
+      .error s!"The type T: {T} of `SELECT *` must match the FROM clause {Γ}."
   | .list _ ss => do
     let T := ss.filterMap fun s => SelectField.getTuple Γ s
     if h : Forall (fun s : SelectField => ∃ t, WellFormedSelectField Γ s t) ss then
@@ -819,7 +821,7 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T
     if heq : T = (Ts.map fun (n, _, ty) => (n, a, ty)) ∧ wwhr.fst = .boolean then
       return ⟨T, .nestedFrom (wsel) wfrm (heq.right ▸ wwhr.snd) heq.left⟩
     else
-      .error s!"Query type {T} must match Select {Ts} type."
+      .error s!"Nested From type {T} must match Select {(Ts.map fun (n, _, ty) => (n, a, ty))} type."
 
 def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except String (Σ' T, (WellFormedQuery Γ t T))
   | ⟨sel, frm, whr⟩, T => do
@@ -1071,15 +1073,14 @@ partial def elabFrom (Γ : Schema) : TSyntax `sqlFrom → TermElabM (Expr × Fro
     let (frme, frm') ← elabFrom Γ frm
     let fromTable := getFromTable Γ frm'
     let al := id.getId.toString
-      match fromTable with
-        | .ok fromTable =>
-          let (whre, whr') ← match expr with
-            | none => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), Expression.value (.boolean true))
-            | some expr => elabExpression fromTable expr
-            -- TODO: how to infer inner sel type?
-          let (sele, sel', T) ← elabSelect fromTable (fromTable.map fun (n, _, T) => (n, al, T)) sel
-          pure (mkApp4 (mkConst ``From.nestedJoin) sele frme whre (mkStrLit al), .nestedJoin sel' frm' whr' al)
-        | .error e => throwErrorAt frm e
+    match fromTable with
+      | .ok fromTable =>
+        let (whre, whr') ← match expr with
+          | none => pure (mkApp (mkConst ``Expression.value) (mkApp (mkConst ``Value.boolean) (mkConst ``true)), Expression.value (.boolean true))
+          | some expr => elabExpression fromTable expr
+        let (sele, sel', T) ← elabSelect fromTable fromTable sel
+        pure (mkApp4 (mkConst ``From.nestedJoin) sele frme whre (mkStrLit al), .nestedJoin sel' frm' whr' al)
+      | .error e => throwErrorAt frm e
     | _ => throwUnsupportedSyntax
 
 def elabCheckedFrom (Γ : Schema) (stx : TSyntax `sqlFrom) : TermElabM (Expr × From × RelationType) := do
@@ -1101,16 +1102,24 @@ def elabQuery (Γ : Schema) (T : RelationType) (stx : TSyntax `sqlQuery) : TermE
       let (sele, sel, Ts) ← elabSelect Tf T sel
       pure (mkApp3 (mkConst ``Query.mk) sele frme whre, Query.mk sel frm' whr, Ts)
     | _ => throwUnsupportedSyntax
-  match checkQuery Γ query Ts with
+  match checkQuery Γ query T with
     | .ok ⟨_, _⟩ => pure expr
     | .error e => throwErrorAt stx e
 
 -- TODO add remaining Values
 def exprToDataType : Expr → TermElabM DataType
-  | .const ``DataType.bigInt _ => pure .bigInt
+  | .const ``DataType.null _ => pure .null
   | .const ``DataType.integer _ => pure .integer
+  | .const ``DataType.bigInt _ => pure .bigInt
+  | .const ``DataType.bit _ => pure .bit
+  | .const ``DataType.varbit _ => pure .varbit
+  | .const ``DataType.boolean _ => pure .boolean
+  | .const ``DataType.char _ => pure .char
+  | .const ``DataType.varchar _ => pure .varchar
   | .const ``DataType.date _ => pure .date
-  | _ => throwUnsupportedSyntax
+  | .const ``DataType.text _ => pure .text
+  | .const ``DataType.double _ => pure .double
+  | e => throwError "Unsupported DataType: {e}"
 
 def exprToField : Expr → TermElabM (String × String × DataType)
   | .app (.app _ <| .lit <| .strVal n) (.app (.app _ <| .lit <| .strVal t) l) => do
@@ -1127,13 +1136,14 @@ def exprToRelationType : Expr → TermElabM RelationType
 def exprToTable : Expr → TermElabM (String × RelationType)
   | .app (.app _ <| .lit <| .strVal <| tableName) L => do
     pure (tableName, ← exprToRelationType L)
-  | _ => throwUnsupportedSyntax
+  | _ => throwError "Failed to parse Schema"
+
 
 def exprToSchema : Expr → TermElabM Schema := fun x => do
   if let .some styp := x.listLit? then
     styp.snd.mapM exprToTable
   else
-    throwUnsupportedSyntax
+    throwError "Failed to parse Schema"
 
 def List.id : List α → List α
  | l => l
@@ -1154,6 +1164,8 @@ def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer"
 
 -- Should select all ✓
 #check schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt)]
+-- Should fail on typo ✓
+#check schema |- SELECT * FROM employee ∶ [("idd", "employee", DataType.bigInt)]
 -- Should not select too many ✓
 #check schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt), ("id", "employee", .bigInt)]
 -- Should not select too few ✓
@@ -1173,7 +1185,7 @@ def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer"
 #check schema |- SELECT b.id FROM employee AS b, customer ∶ [("id", "b", DataType.bigInt)]
 -- Should succeed with field alias ✓
 #check schema |- SELECT employee.id AS fakeID FROM employee ∶ [("fakeID", "employee", DataType.bigInt)]
--- Should only allow nesting with alias ✓
+-- Should only allow nesting with alias ×
 #check schema |- SELECT a.id FROM (SELECT * FROM customer) AS a ∶ [("id", "a", DataType.bigInt)]
 #check schema |- SELECT a.id FROM (SELECT * FROM customer) ∶ [("id", "a", .bigInt)]
 -- Should succeed on correct expr ✓ × (TODO: check date)
@@ -1189,3 +1201,55 @@ def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer"
 #check schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a ∶ [("a", "a.a", DataType.bigInt)]
 -- Should nest deeply ✓
 #check schema |- SELECT a.id FROM (SELECT b.id FROM (SELECT customer.id FROM customer) AS b) AS a ∶ [("id", "a", DataType.bigInt)]
+
+def schema2 : Schema :=
+  [
+    ("Students", [
+      ("student_id", "Students", DataType.integer),
+      ("student_name", "Students", DataType.varchar),
+      ("gender", "Students", DataType.integer),
+      ("age", "Students", DataType.integer),
+      ("major", "Students", DataType.text)
+    ]),
+    ("Courses", [
+      ("course_id", "Courses", DataType.integer),
+      ("course_name", "Courses", DataType.text),
+      ("course_credits", "Courses", DataType.integer)
+    ]),
+    ("Enrollments", [
+      ("enrollment_id", "Enrollments", DataType.integer),
+      ("student_id", "Enrollments", DataType.text),
+      ("semester", "Enrollments", DataType.varchar),
+      ("grade", "Enrollments", DataType.char),
+      ("student_id", "Enrollments", DataType.integer),
+      ("course_id", "Enrollments", DataType.integer),
+    ]),
+  ]
+
+#check schema2 |-
+SELECT
+    Students.student_id,
+    Students.student_name,
+    Students.gender,
+    Students.age,
+    Students.major,
+    Courses.course_name,
+    Courses.course_credits,
+    Enrollments.semester,
+    Enrollments.grade
+FROM
+    Students
+INNER JOIN
+    Enrollments ON Students.student_id = Enrollments.student_id
+INNER JOIN
+    Courses ON Enrollments.course_id = Courses.course_id
+∶ [("student_id", "Students", DataType.integer),
+    ("student_name", "Students", DataType.varchar),
+    ("gender", "Students", DataType.integer),
+    ("age", "Students", DataType.integer),
+    ("major", "Students", DataType.text),
+    ("course_name", "Courses", DataType.text),
+    ("course_credits", "Courses", DataType.integer),
+    ("semester", "Enrollments", DataType.varchar),
+    ("grade", "Enrollments", DataType.char)
+    ]

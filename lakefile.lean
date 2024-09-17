@@ -1,17 +1,21 @@
 import Lake
 open Lake DSL
 
-require alloy from git "https://github.com/tydeu/lean4-alloy/" @ "master"
-require std from git "https://github.com/leanprover/std4.git" @ "main"
+require alloy from git "https://github.com/tydeu/lean4-alloy" @ "master"
 
 package Postgres where
+  buildType := .debug
   -- add package configuration options here
 
-module_data alloy.c.o : BuildJob FilePath
+module_data alloy.c.o.export : BuildJob FilePath
+module_data alloy.c.o.noexport : BuildJob FilePath
 @[default_target]
 lean_lib Postgres where
   precompileModules := true
-  nativeFacets := #[Module.oFacet, `alloy.c.o]
+  nativeFacets := fun shouldExport =>
+    if shouldExport then
+      #[Module.oExportFacet, `alloy.c.o.export]
+    else
+      #[Module.oNoExportFacet, `alloy.c.o.noexport]
   moreLeancArgs := #["-fPIC", "-I/opt/homebrew/opt/libpq/include"]
   moreLinkArgs := #["-lpq", "-L/opt/homebrew/opt/libpq/lib"]
-  -- add library configuration options here

@@ -160,7 +160,6 @@ def execParams (connection : @& Connection) (query : String) (nParams : USize) (
   PGresult *res;
   const int *paramLengths = lean_sarray_cptr(parameterLengths);
   const int *paramFormats = lean_sarray_cptr(parameterLengths);
-  printf("number; %d\n", nParams);
   char **values = malloc(sizeof(void*)*nParams);
   for (int i = 0; i < nParams; i++) {
     char* current = lean_string_cstr(objects[i]);

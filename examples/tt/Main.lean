@@ -1057,9 +1057,14 @@ def elabQuery (stx : TSyntax `sqlQuery) : TermElabM Expr := match stx with
     return mkApp4 (mkConst ``Query.mk) sel frm whr (← quoteAutoTactic stx)
   | _ => throwUnsupportedSyntax
 
-def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : Except (String × Syntax) RelationType :=
+structure TypedQuery where
+  ctx: Schema
+  query: Query
+  type: RelationType
+
+def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : Except (String × Syntax) TypedQuery :=
   match checkQuery Γ t T with
-  | .ok rt => .ok rt.fst
+  | .ok rt => .ok ⟨Γ, t, rt.fst⟩
   | .error e => .error e
 
 elab_rules : term
@@ -1068,7 +1073,7 @@ elab_rules : term
     if let .some s := env.find? id.getId then
       let query ← elabQuery query
       let checked ← elabAppArgs (mkConst ``checkQuery!) #[] #[Arg.expr s.value!, Arg.expr query, Arg.stx relation] .none (explicit := false) (ellipsis := false)
-      let qAST ← unsafe evalExpr (Except (String × Syntax) RelationType) (.app (.app (.const `Except [0, 0]) (.app (.app (.const `Prod [0, 0]) (.const `String [])) (.const `Lean.Syntax []))) (.const ``RelationType [])) checked
+      let qAST ← unsafe evalExpr (Except (String × Syntax) TypedQuery) (.app (.app (.const `Except [0, 0]) (.app (.app (.const `Prod [0, 0]) (.const `String [])) (.const `Lean.Syntax []))) (.const ``TypedQuery [])) checked
       let stx ← getRef
       match qAST with
       | .ok _ => pure query
@@ -1080,10 +1085,6 @@ elab_rules : term
       throwUnsupportedSyntax
 
 def schema : Schema := [("employee", [("id", "employee", DataType.bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
-
--- Check for abstraction e.G. functions that create queries (limitations of library)
--- Better syntax cat names
--- Rather shadow than a' a'' a'''
 
 -- Should select all ✓
 #check pquery( schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt)] )

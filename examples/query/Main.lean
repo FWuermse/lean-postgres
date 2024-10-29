@@ -13,10 +13,10 @@ def stringTables (table : Option (List (List String))) : String :=
   | none => "Error"
   | some t => "\n".intercalate (t.map (", ".intercalate .))
 
-def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
+def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("myTable", [("id", "myTable", .bigInt), ("name", "myTable", .text), ("age", "myTable", .integer)])]
 
 def queriesOnSchema : SQL Unit := do
-  let query := pquery( schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt)] )
+  let query := pquery( schema |- SELECT myTable.id, myTable.age FROM myTable ∶ [("id", "myTable", .bigInt), ("age", "myTable", .integer)] )
   let res ← sendQuery query
   IO.println <| stringTables res
   IO.println query

@@ -16,7 +16,7 @@ inductive DataType
   | date
   | text
   | double
-  deriving BEq, DecidableEq, Repr
+  deriving BEq, DecidableEq, Repr, Inhabited
 
 def DataType.toString
   | null    => "null"
@@ -207,30 +207,29 @@ RelationType
 (name, _) ∈ Ctx
 -/
 inductive SelectField
-  | col (name : String) (table : String) (stx : Syntax)
-  | alias (name : String) (table : String) («alias» : String)
+  | col (e : Expression) (stx : Syntax)
+  | alias (e : Expression) («alias» : String)
 
 def SelectField.toString
-  | col n t _ => s!"{t}.{n}"
-  | .alias n t a => s!"{t}.{n} AS {a}"
-
-def SelectField.name
-  | col n t _ => s!"{t}.{n}"
-  | «alias» n t _ => s!"{t}.{n}"
+  | col (.field s t _) _ => s!"{t}.{s}"
+  | col _ _ => "?column?"
+  | .alias e a => s!"{e} AS {a}"
 
 instance : ToString SelectField :=
   ⟨SelectField.toString⟩
 
 def SelectField.postfix
-  | col s _ _ => s
-  | «alias» s _ _ => s
+  | col (.field s _ _) _ => s
+  | «alias» (.field s _ _) _ => s
+  | _ => "?column?"
 
 def SelectField.getTuple (T : RelationType) : SelectField → Option (String × String × DataType)
-  | col n t _ => T.find? fun (name, table, _) => n == name && t == table
-  | «alias» n t a =>
+  | col (.field n t _) _ => T.find? fun (name, table, _) => n == name && t == table
+  | «alias» (.field n t _) a =>
     match T.find? fun (name, table, _) => n == name && t == table with
     | .some (_, table, type) => (a, table, type)
     | .none => .none
+  | _ => .none
 
 /-
 # Select

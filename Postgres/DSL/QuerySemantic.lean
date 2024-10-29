@@ -173,7 +173,7 @@ inductive WellFormedExpression : RelationType → Expression → DataType → Pr
  | concat :
     -- Inference is not bidirectional (see: https://www.postgresql.org/docs/current/functions-string.html)
     WellFormedExpression Γ lhs .text →
-    WellFormedExpression Γ rhs T₂ →
+    WellFormedExpression Γ rhs T →
     -- Also must check for non-array (however array not yet supported)
     ----------------------------------
     WellFormedExpression Γ (.bin lhs (.aop .con) rhs stx) .text
@@ -201,14 +201,14 @@ inductive WellFormedExpression : RelationType → Expression → DataType → Pr
 
 inductive WellFormedSelectField : RelationType → SelectField → DataType → Prop
   | col :
-    (name, table, T) ∈ Γ →
+    WellFormedExpression Γ e T →
     ----------------------------------
-    WellFormedSelectField Γ (.col name table stx) T
+    WellFormedSelectField Γ (.col e stx) T
     -- Postgres doesn't support nested aliases such as 'a AS b, b AS c'
   | alias :
-    (name, table, T) ∈ Γ →
+    WellFormedExpression Γ e T →
     ----------------------------------
-    WellFormedSelectField Γ (.alias name table a) T
+    WellFormedSelectField Γ (.alias e a) T
 
 inductive WellFormedSelect : RelationType → Select → RelationType → Prop
   | list (ss : List SelectField) :
@@ -219,7 +219,7 @@ inductive WellFormedSelect : RelationType → Select → RelationType → Prop
   | all :
     Γ = T →
     ----------------------------------
-    WellFormedSelect Γ t T
+    WellFormedSelect Γ (.all b stx) T
 
 inductive WellFormedFrom : Schema → From → RelationType → Prop
   | table :
@@ -293,113 +293,6 @@ def getFromTable (Γ : Schema) : (t : From) → Except (String × Syntax) Relati
       let fromTable ← getFromTable Γ f
       let res := ss.filterMap (fun s => SelectField.getTuple fromTable s)
       return res.map fun (n, _, T) => (n, a, T)
-
-@[simp]
-def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) :=
-  match s with
-  | .col name table _ => do
-    if h : (name, table, T) ∈ Γ then
-      pure ⟨T, WellFormedSelectField.col h⟩
-    else
-      .error s!"Selected field {table}.{name} is not in the current context."
-  | .alias name table a =>
-    if h : (name, table, T) ∈ Γ then
-      pure ⟨T, WellFormedSelectField.alias h⟩
-    else
-      .error s!"Selected field {table}.{name} as {a} is not in the current context."
-
--- (Maybe remove dicidable)
-instance (Γ : RelationType) (T : DataType) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isOk) :=
-  fun s =>
-    match s with
-    | .col name table _ =>
-      if h : (name, table, T) ∈ Γ then
-        isTrue (by simp [h]; rfl)
-      else
-        isFalse (by simp [h]; rfl)
-    | .alias name table a =>
-      if h : (name, table, T) ∈ Γ then
-        isTrue (by simp [h]; rfl)
-      else
-        isFalse (by simp [h]; rfl)
-
-instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSelectField Γ s T) :=
-  match s with
-  | .col name table _ =>
-      match hfind : Γ.find? fun (n, t, _) => (n, t) = (name, table) with
-      | .some (n, t, T) =>
-        isTrue (by
-          simp_all
-          apply Exists.intro
-          have hmem : (name, table, T) ∈ Γ :=
-            (by
-              have h_eq : n = name ∧ t = table := (by
-                have h := List.find?_some hfind
-                have ht_eq : (n, t) = (name, table) := by
-                  simp [eq_true_of_decide] at h
-                  simp
-                  exact h
-                cases ht_eq
-                apply And.intro <;> rfl)
-              apply List.mem_of_find?_eq_some
-              . exact h_eq.left ▸ h_eq.right ▸ hfind)
-          apply WellFormedSelectField.col hmem)
-        | .none => isFalse (by
-          simp_all [not_exists, List.find?_eq_none]
-          intro dt
-          have h_neq : (name, table, dt) ∉ Γ  := (by
-            intro hmem
-            have hfalse := hfind (name, table, dt) hmem
-            apply hfalse <;> rfl)
-          intro wfsf
-          cases wfsf
-          apply h_neq
-          assumption)
-  | .alias name table a =>
-      match hfind : Γ.find? fun (n, t, _) => (n, t) = (name, table) with
-      | .some (n, t, T) =>
-        isTrue (by
-          simp_all
-          apply Exists.intro
-          have hmem : (name, table, T) ∈ Γ :=
-            (by
-              have h_eq : n = name ∧ t = table := (by
-                have h := List.find?_some hfind
-                have ht_eq : (n, t) = (name, table) := by
-                  simp [eq_true_of_decide] at h
-                  simp
-                  exact h
-                cases ht_eq
-                apply And.intro <;> rfl)
-              apply List.mem_of_find?_eq_some
-              . exact h_eq.left ▸ h_eq.right ▸ hfind)
-          apply WellFormedSelectField.alias hmem)
-        | .none => isFalse (by
-          simp_all [not_exists, List.find?_eq_none]
-          intro dt
-          have h_neq : (name, table, dt) ∉ Γ  := (by
-            intro hmem
-            have hfalse := hfind (name, table, dt) hmem
-            apply hfalse <;> rfl)
-          intro wfsf
-          cases wfsf
-          apply h_neq
-          assumption)
-
-def checkSel (Γ T : RelationType) (s : Select) : Except (String × Syntax) (Σ' T, WellFormedSelect Γ s T) :=
-  match s with
-  | .all _ stx =>
-    if h : Γ = T then
-      let wsel := WellFormedSelect.all h
-      pure ⟨T, wsel⟩
-    else
-      .error (s!"The type T: {T} of `SELECT *` must match the FROM clause {Γ}.", stx)
-  | .list _ ss stx => do
-    let T := ss.filterMap fun s => SelectField.getTuple Γ s
-    if h : Forall (fun s : SelectField => ∃ t, WellFormedSelectField Γ s t) ss then
-      pure ⟨T, WellFormedSelect.list ss h rfl⟩
-    else
-      .error (s!"All selected fields {ss} must be well formed in the context {Γ}.", stx)
 
 def checkValue (v : Value) : Except (String × Syntax) (Σ' T, WellFormedValue v T) :=
   match v with
@@ -548,6 +441,34 @@ def checkExpression (Γ : RelationType) (e : Expression) : Except (String × Syn
       | .ok r => pure r
       | .error e => .error (e, stx)
       return ⟨wf.fst, .aexpr fst snd wf.snd⟩
+
+@[simp]
+def checkSelectField (Γ : RelationType) (s : SelectField) : Except (String × Syntax) (Σ' T, WellFormedSelectField Γ s T) := do
+  match s with
+  | .col e _ =>
+    let ⟨T, h⟩ ← checkExpression Γ e
+    pure ⟨T, WellFormedSelectField.col h⟩
+  | .alias e _ =>
+    let ⟨T, h⟩ ← checkExpression Γ e
+    pure ⟨T, WellFormedSelectField.alias h⟩
+
+def checkSel (Γ T : RelationType) (s : Select) : Except (String × Syntax) (Σ' T, WellFormedSelect Γ s T) :=
+  match s with
+  | .all _ stx =>
+    if h : Γ = T then
+      let wsel := WellFormedSelect.all h
+      pure ⟨T, wsel⟩
+    else
+      .error (s!"The type T: {T} of `SELECT *` must match the FROM clause {Γ}.", stx)
+  | .list _ ss stx => do
+    let mut proofs := []
+    for s in ss do
+      if let .ok p := checkSelectField Γ s then
+        proofs.insert p
+      else
+        .error ("", stx)
+
+    sorry
 
 def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except (String × Syntax) (Σ' T, WellFormedFrom Γ t T) :=
   match t with

@@ -1,11 +1,3 @@
-import Postgres.DSL.DDLDSL
-import Postgres.DSL.DDLSyntax
-import Postgres.DSL.DeleteDSL
-import Postgres.DSL.DeleteSyntax
-import Postgres.DSL.InsertDSL
-import Postgres.DSL.InsertSyntax
-import Postgres.DSL.QueryDSL
 import Postgres.DSL.QuerySyntax
-import Postgres.DSL.Literal
-import Postgres.DSL.Utils
-import Postgres.DSL.Schema
+import Postgres.DSL.QuerySemantic
+import Postgres.DSL.QueryAST

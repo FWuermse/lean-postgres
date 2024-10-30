@@ -1,8 +1,6 @@
 import Lake
 open System Lake DSL
 
-require Postgres from "../.."
-
 package DDL where
 
 @[default_target]

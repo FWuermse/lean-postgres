@@ -1,4 +1,3 @@
-import Aesop
 import Lean
 
 @[simp]
@@ -26,6 +25,8 @@ instance (p : α → Prop) [DecidablePred p] : DecidablePred (Forall p) := fun _
   decidable_of_iff' _ forall_iff_forall_mem
 
 end Forall
+
+open Lean Syntax
 
 -- instance LawfulBEq
 inductive DataType
@@ -82,31 +83,30 @@ abbrev Schema := List (String × RelationType)
 Following https://www.postgresql.org/docs/current/datatype.html
 -/
 inductive Value
-  | bigInt (i : Int)
-  | bit (len : Nat) (stream : Array Bool)
-  | boolean (b : Bool)
-  | char (len : Nat) (string : String)
-  | date (year : Nat) (month : Fin 13) (year : Fin 32)
-  | double (d : Float)
-  | integer (i : Int)
-  | null
-  | text (value : String)
-  | varbit (len : Nat) (stream : Array Bool)
-  | varchar (len : Nat) (string : String)
-  deriving Repr
+  | bigInt (i : Int) (stx : Syntax)
+  | bit (len : Nat) (stream : Array Bool) (stx : Syntax)
+  | boolean (b : Bool) (stx : Syntax)
+  | char (len : Nat) (string : String) (stx : Syntax)
+  | date (year : Nat) (month : Fin 13) (year : Fin 32) (stx : Syntax)
+  | double (d : Float) (stx : Syntax)
+  | integer (i : Int) (stx : Syntax)
+  | null (stx : Syntax)
+  | text (value : String) (stx : Syntax)
+  | varbit (len : Nat) (stream : Array Bool) (stx : Syntax)
+  | varchar (len : Nat) (string : String) (stx : Syntax)
 
 inductive WellFormedValue : Value → DataType → Prop
-  | bigInt : i < Int.ofNat 2^64 → i > -Int.ofNat 2^64 → WellFormedValue (.bigInt i) .bigInt
-  | bit : b.size = n → WellFormedValue (.bit n b) .bit
-  | boolean : WellFormedValue (.boolean b) .boolean
-  | char : s.length = n → WellFormedValue (.char n s) .char
-  | date : m > 0 ∧ d > 0 → WellFormedValue (.date y m d) .date
-  | double : WellFormedValue (.double f) .double
-  | integer : i < Int.ofNat 2^32 → i > -Int.ofNat 2^32 → WellFormedValue (.integer i) .integer
-  | null : WellFormedValue (.null) .null
-  | text : WellFormedValue (.text s) .text
-  | varbit : b.size ≤ n → WellFormedValue (.varbit n b) .varbit
-  | varchar : s.length ≤ n → WellFormedValue (.varchar n s) .varchar
+  | bigInt : i < Int.ofNat 2^64 → i > -Int.ofNat 2^64 → WellFormedValue (.bigInt i stx) .bigInt
+  | bit : b.size = n → WellFormedValue (.bit n b stx) .bit
+  | boolean : WellFormedValue (.boolean b stx) .boolean
+  | char : s.length = n → WellFormedValue (.char n s stx) .char
+  | date : m > 0 ∧ d > 0 → WellFormedValue (.date y m d stx) .date
+  | double : WellFormedValue (.double f stx) .double
+  | integer : i < Int.ofNat 2^32 → i > -Int.ofNat 2^32 → WellFormedValue (.integer i stx) .integer
+  | null : WellFormedValue (.null stx) .null
+  | text : WellFormedValue (.text s stx) .text
+  | varbit : b.size ≤ n → WellFormedValue (.varbit n b stx) .varbit
+  | varchar : s.length ≤ n → WellFormedValue (.varchar n s stx) .varchar
 
 /-
 When two compatible types are used in the same expression the more general will be the output type.
@@ -174,17 +174,21 @@ inductive WellFormedConv : DataType → DataType → Prop
   | char :
     WellFormedCharConv T₁ T₂ T₃ →
     WellFormedConv T₁ T₂
-  | eq : WellFormedConv T T
+  | eq :
+    T₁ = T₂ →
+    WellFormedConv T₁ T₂
 
 inductive Join
-  | inner | left | right | outer
-  deriving Repr
+  | inner (stx : Syntax)
+  | left (stx : Syntax)
+  | right (stx : Syntax)
+  | outer (stx : Syntax)
 
 def Join.toString : Join → String
-  | inner => "INNER"
-  | left  => "LEFT"
-  | right => "RIGHT"
-  | outer => "OUTER"
+  | inner _ => "INNER"
+  | left  _ => "LEFT"
+  | right _ => "RIGHT"
+  | outer _ => "OUTER"
 
 instance : ToString Join := ⟨Join.toString⟩
 
@@ -264,12 +268,11 @@ DataType
 RelationType (contents of the From-clause Type)
 -/
 inductive Expression
-  | value (l : Value)
-  | field (name : String) (table : String)
-  | bin (lhs : Expression) (op : Operator) (rhs : Expression)
-  | un (op : UnaryOp) (expr : Expression)
+  | value (l : Value) (stx : Syntax)
+  | field (name : String) (table : String) (stx : Syntax)
+  | bin (lhs : Expression) (op : Operator) (rhs : Expression) (stx : Syntax)
+  | un (op : UnaryOp) (expr : Expression) (stx : Syntax)
   -- | function (name : String) (params : List Expression)
-  deriving Repr
 
 /-
 # Expression Typing Judgements
@@ -284,65 +287,65 @@ inductive WellFormedExpression : RelationType → Expression → DataType → Pr
   | value v :
     WellFormedValue v T →
     ----------------------------------
-    WellFormedExpression Γ (.value v) T
+    WellFormedExpression Γ (.value v stx) T
   | field :
     (name, table, T) ∈ Γ →
     ----------------------------------
-    WellFormedExpression Γ (.field name table) T
+    WellFormedExpression Γ (.field name table stx) T
   | fieldPostfix (t : String) :
     Γ.count (name, t, T) = 1 →
     ----------------------------------
-    WellFormedExpression Γ (.field name t) T
+    WellFormedExpression Γ (.field name t stx) T
   | not :
     WellFormedExpression Γ e .boolean →
     ----------------------------------
-    WellFormedExpression Γ (.un .not e) .boolean
+    WellFormedExpression Γ (.un .not e stx) .boolean
   -- Bool not otherwise comparable (see: https://www.postgresql.org/docs/current/functions-logical.html)
   | bcmp :
     WellFormedExpression Γ lhs .boolean →
     WellFormedExpression Γ rhs .boolean →
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.bop op) rhs) .boolean
+    WellFormedExpression Γ (.bin lhs (.bop op) rhs stx) .boolean
   | acmp :
     WellFormedExpression Γ lhs T₁ →
     WellFormedExpression Γ rhs T₂ →
     WellFormedConv T₁ T₂ →
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.acop op) rhs) .boolean
+    WellFormedExpression Γ (.bin lhs (.acop op) rhs stx) .boolean
   | aexpr :
     WellFormedExpression Γ lhs T₁ →
     WellFormedExpression Γ rhs T₂ →
     WellFormedNumConv T₁ T₂ T →
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.aop op) rhs) T
+    WellFormedExpression Γ (.bin lhs (.aop op) rhs stx) T
  | concat :
     -- Inference is not bidirectional (see: https://www.postgresql.org/docs/current/functions-string.html)
     WellFormedExpression Γ lhs .text →
     WellFormedExpression Γ rhs T₂ →
     -- Also must check for non-array (however array not yet supported)
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.aop .con) rhs) .text
+    WellFormedExpression Γ (.bin lhs (.aop .con) rhs stx) .text
   | pos :
     WellFormedExpression Γ e T →
     T = .integer ∨ T = .bigInt ∨ T = .double →
     ----------------------------------
-    WellFormedExpression Γ (.un .add e) T
+    WellFormedExpression Γ (.un .add e stx) T
   | neg :
     WellFormedExpression Γ e T →
     T = .integer ∨ T = .bigInt ∨ T = .double →
     ----------------------------------
-    WellFormedExpression Γ (.un .sub e) T
+    WellFormedExpression Γ (.un .sub e stx) T
   -- Date ops are not symmetrical (see: https://www.postgresql.org/docs/current/functions-datetime.html)
   | dateadd :
     WellFormedExpression Γ lhs .date →
     WellFormedExpression Γ rhs .integer →
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.aop .add) rhs) .date
+    WellFormedExpression Γ (.bin lhs (.aop .add) rhs stx) .date
   | datesub :
     WellFormedExpression Γ lhs .date →
     WellFormedExpression Γ rhs .integer →
     ----------------------------------
-    WellFormedExpression Γ (.bin lhs (.aop .sub) rhs) .date
+    WellFormedExpression Γ (.bin lhs (.aop .sub) rhs stx) .date
 
 /-
 # SelectField
@@ -357,24 +360,28 @@ RelationType
 (name, _) ∈ Ctx
 -/
 inductive SelectField
-  | col (name : String) (table : String)
+  | col (name : String) (table : String) (stx : Syntax)
   | alias (name : String) (table : String) («alias» : String)
-  deriving BEq, DecidableEq, Repr
+
+def SelectField.toString
+  | col n t _ => s!"{t}.{n}"
+  | .alias n t a => s!"{t}.{n} AS {a}"
 
 def SelectField.name
-  | col n t => s!"{t}.{n}"
-  | «alias» _ n t => s!"{t}.{n}"
+  | col n t _ => s!"{t}.{n}"
+  | «alias» n t _ => s!"{t}.{n}"
 
 instance : ToString SelectField :=
-  ⟨SelectField.name⟩
+  ⟨SelectField.toString⟩
 
 def SelectField.postfix
-  | col s _ => s
-  | «alias» _ s _ => s
+  | col s _ _ => s
+  | «alias» s _ _ => s
 
 def SelectField.getTuple (T : RelationType) : SelectField → Option (String × String × DataType)
-  | col n t => T.find? fun (name, table, _) => n == name && t == table
-  | «alias» n t a => match T.find? fun (name, table, _) => n == name && t == table with
+  | col n t _ => T.find? fun (name, table, _) => n == name && t == table
+  | «alias» n t a =>
+    match T.find? fun (name, table, _) => n == name && t == table with
     | .some (_, table, type) => (a, table, type)
     | .none => .none
 
@@ -382,7 +389,7 @@ inductive WellFormedSelectField : RelationType → SelectField → DataType → 
   | col :
     (name, table, T) ∈ Γ →
     ----------------------------------
-    WellFormedSelectField Γ (.col name table) T
+    WellFormedSelectField Γ (.col name table stx) T
     -- Postgres doesn't support nested aliases such as 'a AS b, b AS c'
   | alias :
     (name, table, T) ∈ Γ →
@@ -403,20 +410,18 @@ list: ∀ s ∈ List SelectFields, WellFormedSelectField s
 all: ∀ x ∈ T, x ∈ Γ
 -/
 inductive Select
-  | list : Bool → List SelectField → Select
-  | all  : Bool → Select
-  deriving Repr
+  | list (distinct : Bool) (sf : List SelectField) (stx : Syntax)
+  | all  (distinct : Bool) (stx : Syntax)
 
 /-
 TODO: support for functions such as count etc.
 -/
-@[aesop unsafe 100% apply]
 inductive WellFormedSelect : RelationType → Select → RelationType → Prop
   | list (ss : List SelectField) :
     Forall (∃t, WellFormedSelectField Γ . t) ss →
     (T = ss.filterMap fun s => s.getTuple Γ) →
     ----------------------------------
-    WellFormedSelect Γ (.list b ss) T
+    WellFormedSelect Γ (.list b ss stx) T
   | all :
     Γ = T →
     ----------------------------------
@@ -439,33 +444,31 @@ nestedJoin: WellFormedQuery q
 -/
 -- replace with simpler version where possible (table (name : String))
 inductive From where
-  | table (name : String)
-  | alias (frm : From) (als : String)
-  | join (jOp : Join) (fst : From) (snd : From) (onCond : Expression)
-  | implicitJoin (fst : From) (snd : From)
+  | table (name : String) (stx : Syntax)
+  | alias (frm : From) (als : String) (stx : Syntax)
+  | join (jOp : Join) (fst : From) (snd : From) (onCond : Expression) (stx : Syntax)
+  | implicitJoin (fst : From) (snd : From) (stx : Syntax)
   --| joinUsing (fst : From) (snd : From) (cols : List Expression)
   -- Nested join must have alias (see: https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-SUBQUERIES)
-  | nestedJoin (sel : Select) (frm : From) (whr : Expression) (als : String)
-  deriving Repr
+  | nestedJoin (sel : Select) (frm : From) (whr : Expression) (als : String) (stx : Syntax)
 
-@[aesop unsafe 100% apply]
 inductive WellFormedFrom : Schema → From → RelationType → Prop
   | table :
     (name, T) ∈ Γ →
     ----------------------------------
-    WellFormedFrom Γ (.table name) T
+    WellFormedFrom Γ (.table name stx) T
   -- From aliases override the from table information: https://www.postgresql.org/docs/7.1/queries.html#QUERIES-WHERE
   | alias :
     WellFormedFrom Γ f T →
     u = (T.map fun (name, _, ty) => (name, tableAlias, ty)) →
     ----------------------------------
-    WellFormedFrom Γ (.alias f tableAlias) u
+    WellFormedFrom Γ (.alias f tableAlias stx) u
   | join :
     WellFormedFrom Γ f₁ T₁ →
     WellFormedFrom Γ f₂ T₂ →
     WellFormedExpression (T₁ ++ T₂) e .boolean →
     ----------------------------------
-    WellFormedFrom Γ (.join j f₁ f₂ e) (T₁ ++ T₂)
+    WellFormedFrom Γ (.join j f₁ f₂ e stx) (T₁ ++ T₂)
     -- See https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-JOIN
 /-   | joinUsing (cols : List String) :
     WellFormedFrom Γ f₁ T₁ →
@@ -477,7 +480,7 @@ inductive WellFormedFrom : Schema → From → RelationType → Prop
     WellFormedFrom Γ f₁ T₁ →
     WellFormedFrom Γ f₂ T₂ →
     ----------------------------------
-    WellFormedFrom Γ (.implicitJoin f₁ f₂) (T₁ ++ T₂)
+    WellFormedFrom Γ (.implicitJoin f₁ f₂ stx) (T₁ ++ T₂)
   | nestedFrom :
     WellFormedSelect Tf s Ts →
     WellFormedFrom Γ f Tf →
@@ -485,7 +488,7 @@ inductive WellFormedFrom : Schema → From → RelationType → Prop
     -- Nested join must have alias (see: https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-SUBQUERIES)
     u = (Ts.map fun (name, _, ty) => (name, tableAlias, ty)) →
     ----------------------------------
-    WellFormedFrom Γ (.nestedJoin s f e tableAlias) u
+    WellFormedFrom Γ (.nestedJoin s f e tableAlias stx) u
 
 /-
 # Query
@@ -505,49 +508,47 @@ structure Query where
   select : Select
   «from» : From
   «where» : Expression
-  deriving Repr
+  «syntax» : Syntax
 
-@[aesop unsafe 100% apply]
 inductive WellFormedQuery : Schema → Query → RelationType → Prop
   | mk :
     WellFormedSelect Tf s Ts →
     WellFormedFrom Γ f Tf →
     WellFormedExpression Tf e .boolean →
     ----------------------------------
-    WellFormedQuery Γ ⟨s, f, e⟩ Ts
+    WellFormedQuery Γ ⟨s, f, e, stx⟩ Ts
 
-def getFromTable (Γ : Schema) : (t : From) → Except String RelationType
-  | .table name =>
+def getFromTable (Γ : Schema) : (t : From) → Except (String × Syntax) RelationType
+  | .table name stx =>
     let table := Γ.find? fun (n, _) => n == name
     match table with
-      | .some (_, t) => .ok t
-      | .none => .error s!"Could not find table {name}"
-  | .alias frm _ => getFromTable Γ frm
-  | .implicitJoin frm₁ frm₂ => do
+    | .some (_, t) => .ok t
+    | .none => .error (s!"Could not find table {name}", stx)
+  | .alias frm a _ => do
+    let rt ← getFromTable Γ frm
+    return rt.map fun (n, _, T) => (n, a, T)
+  | .implicitJoin frm₁ frm₂ _ => do
     let fst ← getFromTable Γ frm₁
     let snd ← getFromTable Γ frm₂
     return fst ++ snd
-  | .join _ frm₁ frm₂ _ => do
+  | .join _ frm₁ frm₂ _ _ => do
     let fst ← getFromTable Γ frm₁
     let snd ← getFromTable Γ frm₂
     return fst ++ snd
-  | .nestedJoin s f _ as => match s with
-    | .all _ => getFromTable Γ f
-    | .list _ l =>
-      return l.filterMap fun (sf : SelectField) =>
-        match getFromTable Γ f with
-          | .ok rt => match sf with
-            | .col n t => match rt.find? fun (n', t', _) => n == n' && t == t' with
-              | .some v => .some v
-              | .none => none
-            | .alias n t a => match rt.find? fun (n', t', _) => n == n' && t == t' with
-              | .some v => .some {v with fst := a}
-              | .none => none
-          | .error _ => .none
+  | .nestedJoin s f _ a _ =>
+    match s with
+    | .all _ _ => do
+      let fromTable ← getFromTable Γ f
+      return fromTable.map fun (n, _, T) => (n, a, T)
+    | .list _ ss _ => do
+      let fromTable ← getFromTable Γ f
+      let res := ss.filterMap (fun s => SelectField.getTuple fromTable s)
+      return res.map fun (n, _, T) => (n, a, T)
 
 @[simp]
-def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) := match s with
-  | .col name table => do
+def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Except String (Σ' T, WellFormedSelectField Γ s T) :=
+  match s with
+  | .col name table _ => do
     if h : (name, table, T) ∈ Γ then
       pure ⟨T, WellFormedSelectField.col h⟩
     else
@@ -562,7 +563,7 @@ def checkSelectField (Γ : RelationType) (s : SelectField) (T : DataType) : Exce
 instance (Γ : RelationType) (T : DataType) : DecidablePred (fun s : SelectField => (checkSelectField Γ s T).isOk) :=
   fun s =>
     match s with
-    | .col name table =>
+    | .col name table _ =>
       if h : (name, table, T) ∈ Γ then
         isTrue (by simp [h]; rfl)
       else
@@ -573,26 +574,29 @@ instance (Γ : RelationType) (T : DataType) : DecidablePred (fun s : SelectField
       else
         isFalse (by simp [h]; rfl)
 
-instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSelectField Γ s T) := match s with
-  | .col name table =>
+instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSelectField Γ s T) :=
+  match s with
+  | .col name table _ =>
       match hfind : Γ.find? fun (n, t, _) => (n, t) = (name, table) with
-        | .some (n, t, T) =>
-          isTrue (by
-            simp_all
-            apply Exists.intro
-            have hmem : (name, table, T) ∈ Γ :=
-              (by
-                have h_eq : n = name ∧ t = table := (by
-                  have h := List.find?_some hfind
-                  have ht_eq : (n, t) = (name, table) :=
-                    by simp [eq_true_of_decide h]
-                  cases ht_eq
-                  apply And.intro <;> rfl)
-                apply List.mem_of_find?_eq_some
-                . exact h_eq.left ▸ h_eq.right ▸ hfind)
-            apply WellFormedSelectField.col hmem)
+      | .some (n, t, T) =>
+        isTrue (by
+          simp_all
+          apply Exists.intro
+          have hmem : (name, table, T) ∈ Γ :=
+            (by
+              have h_eq : n = name ∧ t = table := (by
+                have h := List.find?_some hfind
+                have ht_eq : (n, t) = (name, table) := by
+                  simp [eq_true_of_decide] at h
+                  simp
+                  exact h
+                cases ht_eq
+                apply And.intro <;> rfl)
+              apply List.mem_of_find?_eq_some
+              . exact h_eq.left ▸ h_eq.right ▸ hfind)
+          apply WellFormedSelectField.col hmem)
         | .none => isFalse (by
-          simp_all [not_exists, Not, List.find?_eq_none]
+          simp_all [not_exists, List.find?_eq_none]
           intro dt
           have h_neq : (name, table, dt) ∉ Γ  := (by
             intro hmem
@@ -604,23 +608,25 @@ instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSele
           assumption)
   | .alias name table a =>
       match hfind : Γ.find? fun (n, t, _) => (n, t) = (name, table) with
-        | .some (n, t, T) =>
-          isTrue (by
-            simp_all
-            apply Exists.intro
-            have hmem : (name, table, T) ∈ Γ :=
-              (by
-                have h_eq : n = name ∧ t = table := (by
-                  have h := List.find?_some hfind
-                  have ht_eq : (n, t) = (name, table) :=
-                    by simp [eq_true_of_decide h]
-                  cases ht_eq
-                  apply And.intro <;> rfl)
-                apply List.mem_of_find?_eq_some
-                . exact h_eq.left ▸ h_eq.right ▸ hfind)
-            apply WellFormedSelectField.alias hmem)
+      | .some (n, t, T) =>
+        isTrue (by
+          simp_all
+          apply Exists.intro
+          have hmem : (name, table, T) ∈ Γ :=
+            (by
+              have h_eq : n = name ∧ t = table := (by
+                have h := List.find?_some hfind
+                have ht_eq : (n, t) = (name, table) := by
+                  simp [eq_true_of_decide] at h
+                  simp
+                  exact h
+                cases ht_eq
+                apply And.intro <;> rfl)
+              apply List.mem_of_find?_eq_some
+              . exact h_eq.left ▸ h_eq.right ▸ hfind)
+          apply WellFormedSelectField.alias hmem)
         | .none => isFalse (by
-          simp_all [not_exists, Not, List.find?_eq_none]
+          simp_all [not_exists, List.find?_eq_none]
           intro dt
           have h_neq : (name, table, dt) ∉ Γ  := (by
             intro hmem
@@ -631,64 +637,63 @@ instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSele
           apply h_neq
           assumption)
 
-def checkSel (Γ T : RelationType) (s : Select) : Except String (Σ' T, WellFormedSelect Γ s T) := match s with
-  | .all _ =>
+def checkSel (Γ T : RelationType) (s : Select) : Except (String × Syntax) (Σ' T, WellFormedSelect Γ s T) :=
+  match s with
+  | .all _ stx =>
     if h : Γ = T then
       let wsel := WellFormedSelect.all h
       pure ⟨T, wsel⟩
     else
-      .error s!"The type of `SELECT *` must match the FROM clause {Γ}."
-  | .list _ ss => do
+      .error (s!"The type T: {T} of `SELECT *` must match the FROM clause {Γ}.", stx)
+  | .list _ ss stx => do
     let T := ss.filterMap fun s => SelectField.getTuple Γ s
     if h : Forall (fun s : SelectField => ∃ t, WellFormedSelectField Γ s t) ss then
-      if h' : T = ss.filterMap (fun s => SelectField.getTuple Γ s) then
-        pure ⟨T, WellFormedSelect.list ss h h'⟩
-      else
-        .error s!"Selection Type {T} must have length of selectFields: {ss.length}."
+      pure ⟨T, WellFormedSelect.list ss h rfl⟩
     else
-      .error s!"All selected fields {ss} must be well formed in the context {Γ}."
+      .error (s!"All selected fields {ss} must be well formed in the context {Γ}.", stx)
 
-def checkValue (v : Value) : Except String (Σ' T, WellFormedValue v T) := match v with
-  | .null => pure ⟨.null, .null⟩
-  | .integer i => do
+def checkValue (v : Value) : Except (String × Syntax) (Σ' T, WellFormedValue v T) :=
+  match v with
+  | .null _ => pure ⟨.null, .null⟩
+  | .integer i stx => do
     if h₁ : i < 2^32 then
       if h₂ : i > -2^32 then
         pure ⟨.integer, .integer h₁ h₂⟩
       else
-        .error s!"Integer value of {i} causes an overflow."
+        .error (s!"Integer value of {i} causes an overflow.", stx)
     else
-      .error s!"Integer value of {i} causes an overflow."
-  | .bigInt i => do
+      .error (s!"Integer value of {i} causes an overflow.", stx)
+  | .bigInt i stx => do
     if h₁ : i < 2^64 then
       if h₂ : i > -2^64 then
         pure ⟨.bigInt, .bigInt h₁ h₂⟩
       else
-        .error s!"Integer value of {i} causes an overflow."
+        .error (s!"Integer value of {i} causes an overflow.", stx)
     else
-      .error s!"Integer value of {i} causes an overflow."
-  | .bit n ba => if h : ba.size = n then
+      .error (s!"Integer value of {i} causes an overflow.", stx)
+  | .bit n ba stx => if h : ba.size = n then
       pure ⟨.bit, .bit h⟩
     else
-      .error s!"ByteStream {ba} must have exactly length {n}"
-  | .varbit n ba => if h : ba.size ≤ n then
+      .error (s!"ByteStream {ba} must have exactly length {n}", stx)
+  | .varbit n ba stx => if h : ba.size ≤ n then
       pure ⟨.varbit, .varbit h⟩
     else
-      .error s!"ByteStream {ba} must not exceed length {n}"
-  | .boolean _ => pure ⟨.boolean, .boolean⟩
-  | .char n s => if h : s.length = n then
+      .error (s!"ByteStream {ba} must not exceed length {n}", stx)
+  | .boolean _ _ => pure ⟨.boolean, .boolean⟩
+  | .char n s stx => if h : s.length = n then
       pure ⟨.char, .char h⟩
     else
-      .error s!"String {s} must have exactly length {n}"
-  | .varchar n s => if h : s.length ≤ n then
+      .error (s!"String {s} must have exactly length {n}", stx)
+  | .varchar n s stx => if h : s.length ≤ n then
       pure ⟨.varchar, .varchar h⟩
     else
-      .error s!"String {s} must not exceed length {n}"
-  | .date y m d => if h : m > 0 ∧ d > 0 then
+      .error (s!"String {s} must not exceed length {n}", stx)
+  | .date y m d stx => if h : m > 0 ∧ d > 0 then
       pure ⟨.date, .date h⟩
     else
-      .error s!"Invalid date: {y}-{m}-{d}"
-  | .text _ => pure ⟨.text, .text⟩
-  | .double _ => pure ⟨.double, .double⟩
+      .error (s!"Invalid date: {y}-{m}-{d}", stx)
+  | .text _ _ => pure ⟨.text, .text⟩
+  | .double _ _ => pure ⟨.double, .double⟩
 
 def checkNumConv (fst : DataType) (snd : DataType) : Except String (Σ' T, WellFormedNumConv fst snd T) :=
   if hfst : fst = DataType.integer ∨ fst = .bigInt ∨ fst = .double then
@@ -696,15 +701,15 @@ def checkNumConv (fst : DataType) (snd : DataType) : Except String (Σ' T, WellF
       pure ⟨fst, .eq hfst hsnd⟩
     else
       match fst, snd with
-        | .integer, .bigInt => pure ⟨_, .intBigInt rfl rfl⟩
-        | .integer, .double => pure ⟨_, .intDouble rfl rfl⟩
-        | .bigInt, .double => pure ⟨_, .bigIntDouble rfl rfl⟩
-        | .bigInt, .integer => pure ⟨_, .symm <| .intBigInt rfl rfl⟩
-        | .double, .integer => pure ⟨_, .symm <| .intDouble rfl rfl⟩
-        | .double, .bigInt => pure ⟨_, .symm <| .bigIntDouble rfl rfl⟩
-        | _, _ => .error s!"Types are not comparable"
+      | .integer, .bigInt => pure ⟨_, .intBigInt rfl rfl⟩
+      | .integer, .double => pure ⟨_, .intDouble rfl rfl⟩
+      | .bigInt, .double => pure ⟨_, .bigIntDouble rfl rfl⟩
+      | .bigInt, .integer => pure ⟨_, .symm <| .intBigInt rfl rfl⟩
+      | .double, .integer => pure ⟨_, .symm <| .intDouble rfl rfl⟩
+      | .double, .bigInt => pure ⟨_, .symm <| .bigIntDouble rfl rfl⟩
+      | _, _ => .error s!"{fst} and {snd} are not comparable number types."
   else
-    .error s!"Types are not comparable"
+    .error s!"{fst} and {snd} are not comparable number types"
 
 def checkCharConv (fst : DataType) (snd : DataType) : Except String (Σ' T, WellFormedCharConv fst snd T) :=
   if hfst : fst = DataType.char ∨ fst = .varchar ∨ fst = .text then
@@ -712,91 +717,105 @@ def checkCharConv (fst : DataType) (snd : DataType) : Except String (Σ' T, Well
       pure ⟨fst, WellFormedCharConv.char hfst hsnd⟩
     else
       match fst, snd with
-        | .char, .varchar => pure ⟨_, .cvc rfl rfl⟩
-        | .char, .text => pure ⟨_, .ctx rfl rfl⟩
-        | .varchar, .text => pure ⟨_, .vctx rfl rfl⟩
-        | .varchar, .char => pure ⟨_, .symm <| .cvc rfl rfl⟩
-        | .text, .char => pure ⟨_, .symm <| .ctx rfl rfl⟩
-        | .text, .varchar => pure ⟨_, .symm <| .vctx rfl rfl⟩
-        | _, _ => .error s!"Types are not comparable"
+      | .char, .varchar => pure ⟨_, .cvc rfl rfl⟩
+      | .char, .text => pure ⟨_, .ctx rfl rfl⟩
+      | .varchar, .text => pure ⟨_, .vctx rfl rfl⟩
+      | .varchar, .char => pure ⟨_, .symm <| .cvc rfl rfl⟩
+      | .text, .char => pure ⟨_, .symm <| .ctx rfl rfl⟩
+      | .text, .varchar => pure ⟨_, .symm <| .vctx rfl rfl⟩
+      | _, _ => .error s!"{fst} and {snd} are not comparable char types."
   else
-    .error s!"Types are not comparable"
+    .error s!"{fst} and {snd} are not comparable char types"
 
 def checkConv (fst : DataType) (snd : DataType) : Except String (PLift <| WellFormedConv fst snd) := do
-  let ⟨_, h⟩ ← checkNumConv fst snd
-  return PLift.up <| WellFormedConv.numeric h
+  if let .ok ⟨_, h⟩ := checkNumConv fst snd then
+    return PLift.up <| .numeric h
+  else
+    if let .ok ⟨_, h⟩ := checkCharConv fst snd then
+      return PLift.up <| .char h
+    else
+      if h : fst = snd then
+        return PLift.up <| WellFormedConv.eq h
+      else
+        .error "Types {fst} and {snd} are not comparable"
 
-def checkExpression (Γ : RelationType) (e : Expression) : Except String (Σ' T, WellFormedExpression Γ e T) := match e with
-  | .value v => do
+def checkExpression (Γ : RelationType) (e : Expression) : Except (String × Syntax) (Σ' T, WellFormedExpression Γ e T) :=
+  match e with
+  | .value v _ => do
     let ⟨T, hv⟩ ← checkValue v
     pure ⟨T, .value v hv⟩
-  | .field name table =>
+  | .field name table stx =>
     let field := (Γ.find? fun (n, _) => n == name).orElse fun _ => (Γ.find? fun (n, _) => n == name)
     if let .some (_, _, t) := field then
       if h : (name, table, t) ∈ Γ then
         let waexpr := WellFormedExpression.field
         pure ⟨t, waexpr h⟩
       else
-        .error s!"The field {name} is not present in this context."
+        .error (s!"The field {name} is not present in this context {Γ}.", stx)
     else
-      .error s!"The field {name} is not present in this context."
-  | .un .not bexpr => do
+      .error (s!"The field {name} is not present in this context {Γ}.", stx)
+  | .un .not bexpr stx => do
     let ⟨T, wbe⟩ ← checkExpression Γ bexpr
     if h : T = .boolean then
       pure ⟨.boolean, .not <| h ▸ wbe⟩
     else
-      .error "Only boolean expressions can be negated."
-  | .un op aexpr => do
+      .error ("Only boolean expressions can be negated.", stx)
+  | .un op aexpr stx => do
     let ⟨T, wae⟩ ← checkExpression Γ aexpr
     if h : T = .integer ∨ T = .bigInt ∨ T = .double then
       match op with
-        | .add => pure ⟨T, .pos wae h⟩
-        | .sub => pure ⟨T, .neg wae h⟩
-        | _ => .error s!"Only numeric expressions can have a sign. {T} is not numeric."
+      | .add => pure ⟨T, .pos wae h⟩
+      | .sub => pure ⟨T, .neg wae h⟩
+      | _ => .error (s!"Only numeric expressions can have a sign. {T} is not numeric.", stx)
     else
-      .error s!"Only numeric expressions can have a sign. {T} is not numeric."
-  | .bin bexpr₁ (.bop op) bexpr₂ => do
+      .error (s!"Only numeric expressions can have a sign. {T} is not numeric.", stx)
+  | .bin bexpr₁ (.bop op) bexpr₂ stx => do
     let ⟨T₁, fst⟩ ← checkExpression Γ bexpr₁
     let ⟨T₂, snd⟩ ← checkExpression Γ bexpr₂
     if h₁ : T₁ = .boolean then
       if h₂ : T₂ = .boolean then
           pure ⟨.boolean, .bcmp (h₁ ▸ fst) (h₂ ▸ snd)⟩
       else
-        .error s!"Operator {(Operator.bop op)} only supports boolean expressions on rhs: {T₂}."
+        .error (s!"Operator{(Operator.bop op)}only supports boolean expressions on rhs: {T₂}.", stx)
     else
-      .error s!"Operator {(Operator.bop op)} only supports boolean expressions on lhs: {T₁}."
-  | .bin aexpr₁ (.acop _) aexpr₂ => do
+      .error (s!"Operator{(Operator.bop op)}only supports boolean expressions on lhs: {T₁}.", stx)
+  | .bin aexpr₁ (.acop _) aexpr₂ stx => do
     let ⟨a₁, fst⟩ ← checkExpression Γ aexpr₁
     let ⟨a₂, snd⟩ ← checkExpression Γ aexpr₂
-    let wf ← checkConv a₁ a₂
+    let wf ← match checkConv a₁ a₂ with
+    | .ok r => pure r
+    | .error e => .error (e, stx)
     return ⟨.boolean, .acmp fst snd wf.down⟩
-  | .bin aexpr₁ (.aop op) aexpr₂ => do
+  | .bin aexpr₁ (.aop op) aexpr₂ stx => do
     let ⟨a₁, fst⟩ ← checkExpression Γ aexpr₁
     let ⟨a₂, snd⟩ ← checkExpression Γ aexpr₂
     if h : a₁ = .date ∧ a₂ = .integer then
       match op with
-        | .add => return ⟨.date, .dateadd (h.left ▸ fst) (h.right ▸ snd)⟩
-        | .sub => return ⟨.date, .datesub (h.left ▸ fst) (h.right ▸ snd)⟩
-        | _ => .error s!"Invalid operationr {(Operator.aop op)} on type Date."
+      | .add => return ⟨.date, .dateadd (h.left ▸ fst) (h.right ▸ snd)⟩
+      | .sub => return ⟨.date, .datesub (h.left ▸ fst) (h.right ▸ snd)⟩
+      | _ => .error (s!"Invalid operationr {(Operator.aop op)} on type Date.", stx)
     else
-      let wf ← checkNumConv a₁ a₂
+      let wf ← match checkNumConv a₁ a₂ with
+      | .ok r => pure r
+      | .error e => .error (e, stx)
       return ⟨wf.fst, .aexpr fst snd wf.snd⟩
 
-def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T, WellFormedFrom Γ t T) := match t with
-  | .table name =>
+def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except (String × Syntax) (Σ' T, WellFormedFrom Γ t T) :=
+  match t with
+  | .table name stx =>
     if mem : (name, T) ∈ Γ then
       let wfrm := .table mem
       pure ⟨T, wfrm⟩
     else
-      .error s!"Table {name} : {T} not in Schema {Γ}."
-  | .alias frm a => do
-    let ⟨T, wfrm⟩ ← checkFrom Γ T frm
+      .error (s!"Table {name} : {T} not in Schema {Γ}.", stx)
+  | .alias frm a _ => do
+    let ⟨T, wfrm⟩ ← checkFrom Γ (← getFromTable Γ frm) frm
     pure ⟨T.map fun (n, _, ty) => (n, a, ty), .alias wfrm rfl⟩
-  | .implicitJoin frm₁ frm₂ => do
+  | .implicitJoin frm₁ frm₂ _ => do
     let ⟨T₁, wfrm₁⟩ ← checkFrom Γ (← getFromTable Γ frm₁) frm₁
     let ⟨T₂, wfrm₂⟩ ← checkFrom Γ (← getFromTable Γ frm₂) frm₂
     pure ⟨T₁++T₂, .implicitJoin wfrm₁ wfrm₂⟩
-  | .join _ frm₁ frm₂ prop => do
+  | .join _ frm₁ frm₂ prop stx => do
     let ⟨T₁, wfrm₁⟩ ← checkFrom Γ (← getFromTable Γ frm₁) frm₁
     let ⟨T₂, wfrm₂⟩ ← checkFrom Γ (← getFromTable Γ frm₂) frm₂
     let prp ← checkExpression (T₁ ++ T₂) prop
@@ -804,19 +823,19 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except String (Σ' T
     if h : prp.fst = .boolean then
       pure ⟨T₁ ++ T₂, wfrm (h ▸ prp.snd)⟩
     else
-      .error "Where clauses can only contain boolean expressions."
-  | .nestedJoin sel frm whr as => do
+      .error ("Where clauses can only contain boolean expressions.", stx)
+  | .nestedJoin sel frm whr a stx => do
     let fromTable ← getFromTable Γ frm
     let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
-    let ⟨Ts, wsel⟩ ← checkSel Tf T sel
+    let ⟨Ts, wsel⟩ ← checkSel Tf fromTable sel
     let wwhr ← checkExpression Tf whr
-    if heq : Ts = T ∧ wwhr.fst = .boolean then
-      return ⟨T.map fun (name, _, ty) => (name, as, ty), .nestedFrom (heq.left ▸ wsel) wfrm (heq.right ▸ wwhr.snd) rfl⟩
+    if heq : T = (Ts.map fun (n, _, ty) => (n, a, ty)) ∧ wwhr.fst = .boolean then
+      return ⟨T, .nestedFrom (wsel) wfrm (heq.right ▸ wwhr.snd) heq.left⟩
     else
-      .error s!"Query type {T} must match Select {Ts} type."
+      .error (s!"Nested From type {T} must match Select {(Ts.map fun (n, _, ty) => (n, a, ty))} type.", stx)
 
-def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except String (Σ' T, (WellFormedQuery Γ t T))
-  | ⟨sel, frm, whr⟩, T => do
+def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except (String × Syntax) (Σ' T, (WellFormedQuery Γ t T))
+  | ⟨sel, frm, whr, stx⟩, T => do
     let fromTable ← getFromTable Γ frm
     let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
     let ⟨Ts, wsel⟩ ← checkSel Tf T sel
@@ -824,272 +843,337 @@ def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except Str
     if heq : Ts = T ∧ wwhr.fst = .boolean then
       return ⟨Ts, (.mk (heq.left ▸ wsel) wfrm (heq.right ▸ wwhr.snd))⟩
     else
-      .error s!"Query type {T} must match Select {Ts} type."
+      .error (s!"Query type {T} must match Select {Ts} type.", stx)
 
 open Lean Elab Meta Term
 
-declare_syntax_cat                 value
-syntax num                       : value
-syntax str                       : value
-syntax scientific                : value
-syntax "NULL"                    : value
-syntax "(" value ")"             : value
+def exprToDataType : Expr → TermElabM DataType
+  | .const ``DataType.null _ => pure .null
+  | .const ``DataType.integer _ => pure .integer
+  | .const ``DataType.bigInt _ => pure .bigInt
+  | .const ``DataType.bit _ => pure .bit
+  | .const ``DataType.varbit _ => pure .varbit
+  | .const ``DataType.boolean _ => pure .boolean
+  | .const ``DataType.char _ => pure .char
+  | .const ``DataType.varchar _ => pure .varchar
+  | .const ``DataType.date _ => pure .date
+  | .const ``DataType.text _ => pure .text
+  | .const ``DataType.double _ => pure .double
+  | e => throwError "Unsupported DataType: {e}"
 
-declare_syntax_cat                 selectField
-syntax ident                     : selectField
-syntax ident " AS " ident        : selectField
+declare_syntax_cat                    value
+syntax num                          : value
+syntax str                          : value
+syntax scientific                   : value
+syntax "NULL"                       : value
+syntax "(" value ")"                : value
 
-declare_syntax_cat                 sqlSelect
-syntax "*"                       : sqlSelect
-syntax "DISTINCT " "*"           : sqlSelect
-syntax selectField,+             : sqlSelect
-syntax "DISTINCT " selectField,+ : sqlSelect
+declare_syntax_cat                    selectField
+syntax ident                        : selectField
+syntax ident " AS " ident           : selectField
 
-declare_syntax_cat                 propSymbol
-syntax " = "                     : propSymbol
-syntax " <> "                    : propSymbol
-syntax " != "                    : propSymbol
-syntax " < "                     : propSymbol
-syntax " <= "                    : propSymbol
-syntax " > "                     : propSymbol
-syntax " >= "                    : propSymbol
-syntax " + "                     : propSymbol
-syntax " - "                     : propSymbol
-syntax " / "                     : propSymbol
-syntax " * "                     : propSymbol
-syntax " % "                     : propSymbol
-syntax " || "                    : propSymbol
+declare_syntax_cat                    sqlSelect
+syntax "*"                          : sqlSelect
+syntax "DISTINCT " "*"              : sqlSelect
+syntax selectField,+                : sqlSelect
+syntax "DISTINCT " selectField,+    : sqlSelect
 
-declare_syntax_cat                 expr
-syntax "TRUE"                    : expr
-syntax "FALSE"                   : expr
-syntax value                     : expr
-syntax ident                     : expr
+declare_syntax_cat                    op
+syntax " = "                        : op
+syntax " <> "                       : op
+syntax " != "                       : op
+syntax " < "                        : op
+syntax " <= "                       : op
+syntax " > "                        : op
+syntax " >= "                       : op
+syntax " + "                        : op
+syntax " - "                        : op
+syntax " / "                        : op
+syntax " * "                        : op
+syntax " % "                        : op
+syntax " || "                       : op
+
+declare_syntax_cat                    expr
+syntax "TRUE"                       : expr
+syntax "FALSE"                      : expr
+syntax value                        : expr
+syntax ident                        : expr
 syntax:65 "+" expr:66               : expr
 syntax:65 "-" expr:66               : expr
-syntax:64 expr:65 propSymbol expr:65      : expr
+syntax:64 expr:65 op expr:65        : expr
 syntax:63 expr " AND " expr         : expr
 syntax:63 expr " OR "  expr         : expr
 syntax:63 " NOT " expr              : expr
-syntax "(" expr ")"              : expr
+syntax "(" expr ")"                 : expr
 
-declare_syntax_cat                 join
-syntax " INNER "                 : join
-syntax " LEFT "                  : join
-syntax " RIGHT "                 : join
-syntax " OUTER "                 : join
+declare_syntax_cat                    join
+syntax " INNER "                    : join
+syntax " LEFT "                     : join
+syntax " RIGHT "                    : join
+syntax " OUTER "                    : join
 
-declare_syntax_cat                                      sqlFrom
-declare_syntax_cat                                      sqlQuery
+declare_syntax_cat                                              sqlQuery
+declare_syntax_cat                                              sqlFrom
 
-syntax ident                                          : sqlFrom
-syntax sqlFrom ", " sqlFrom                           : sqlFrom
-syntax sqlFrom " AS " ident                           : sqlFrom
-syntax sqlFrom join " JOIN " sqlFrom " ON " expr      : sqlFrom
-syntax sqlFrom join " JOIN " sqlFrom " USING " expr   : sqlFrom
-syntax "(" "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " expr)? ")" " AS " ident : sqlFrom
-syntax "(" sqlFrom ")"                                : sqlFrom
+syntax ident                                                  : sqlFrom
+syntax sqlFrom ", " sqlFrom                                   : sqlFrom
+syntax sqlFrom " AS " ident                                   : sqlFrom
+syntax sqlFrom join " JOIN " sqlFrom " ON " expr              : sqlFrom
+syntax sqlFrom join " JOIN " sqlFrom " USING " expr           : sqlFrom
+syntax "(" sqlQuery ")" " AS " ident                          : sqlFrom
+syntax "(" sqlFrom ")"                                        : sqlFrom
 
 syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " expr)? : sqlQuery
 
-syntax (name := pgquery) ident " |- " sqlQuery " ∶ " term : term
+syntax (name := pgquery) "pquery(" ident " |- " sqlQuery " ∶ " term ")" : term
 
-def mkApp' (name : Name) (e : Expr) : Expr :=
-  mkApp (mkConst name) e
-
-def negFloat (f : Float) : Float :=
-  -1.0 * f
-
--- Default typing values for such cases e.G. is 3<3 bigInt or int?
-partial def elabValue : TSyntax `value → TermElabM Expr
-  | `(value|$v:num)         => do
+partial def elabValue (stx : TSyntax `value) : TermElabM Expr := do
+  let expr := match stx with
     -- defaults to integer (see https://www.postgresql.org/docs/7.3/datatype.html)
-    mkAppM ``Value.integer #[mkApp (mkConst ``Int.ofNat) (mkNatLit v.getNat)]
-  | `(value|$v:scientific)  => do
-    mkAppM ``Value.double #[← Term.elabScientificLit v (mkConst `Float)]
-  | `(value|$v:str)         =>
+  | `(value|$v:num) => return mkApp2 (mkConst ``Value.integer) (mkApp (mkConst ``Int.ofNat) (mkNatLit v.getNat)) (← quoteAutoTactic stx)
+  | `(value|$v:scientific) => return mkApp2 (mkConst ``Value.double) (← Term.elabScientificLit v (mkConst `Float)) (← quoteAutoTactic stx)
     -- Defaults to text: (see https://www.postgresql.org/docs/current/datatype-character.html)
-    mkAppM ``Value.varchar #[mkNatLit 255, mkStrLit v.getString]
-  | `(value|NULL)              => pure <| mkConst ``Value.null
-  | `(value|($v:value))        => elabValue v
-  | _                          => throwUnsupportedSyntax
+  | `(value|$v:str) => return mkApp3 (mkConst ``Value.varchar) (mkNatLit 255) (mkStrLit v.getString) (← quoteAutoTactic stx)
+  | `(value|NULL) => return mkApp (Lean.mkConst ``Value.null) (← quoteAutoTactic stx)
+  | `(value|($v:value)) => elabValue v
+  | _ => throwUnsupportedSyntax
+  -- TODO: Include remaining types
+  expr
 
-def elabPropSymbol (stx : TSyntax `propSymbol) : TermElabM Expr :=
-  match stx with
-  | `(propSymbol|=)  => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.eq]
-  | `(propSymbol|<>) => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.ne]
-  | `(propSymbol|!=) => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.ne]
-  | `(propSymbol|<)  => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.lt]
-  | `(propSymbol|<=) => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.le]
-  | `(propSymbol|>)  => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.gt]
-  | `(propSymbol|>=) => mkAppM ``Operator.acop #[mkConst ``AExprCmpOp.ge]
-  | `(propSymbol|+) => mkAppM ``Operator.aop #[mkConst ``AExprOp.add]
-  | `(propSymbol|-) => mkAppM ``Operator.aop #[mkConst ``AExprOp.sub]
-  | `(propSymbol|/) => mkAppM ``Operator.aop #[mkConst ``AExprOp.div]
-  | `(propSymbol|*) => mkAppM ``Operator.aop #[mkConst ``AExprOp.mul]
-  | `(propSymbol|%) => mkAppM ``Operator.aop #[mkConst ``AExprOp.mod]
-  | `(propSymbol|||) => mkAppM ``Operator.aop #[mkConst ``AExprOp.con]
+def elabOp : TSyntax `op → TermElabM Expr
+  | `(op|=)  => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.eq)
+  | `(op|<>) => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne)
+  | `(op|!=) => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ne)
+  | `(op|<)  => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.lt)
+  | `(op|<=) => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.le)
+  | `(op|>)  => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.gt)
+  | `(op|>=) => return mkApp (mkConst ``Operator.acop) (mkConst ``AExprCmpOp.ge)
+  | `(op|+) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.add)
+  | `(op|-) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.sub)
+  | `(op|/) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.div)
+  | `(op|*) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mul)
+  | `(op|%) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.mod)
+  | `(op|||) => return mkApp (mkConst ``Operator.aop) (mkConst ``AExprOp.con)
   | _                => throwUnsupportedSyntax
 
-partial def elabExpression : TSyntax `expr → TermElabM Expr
-  | `(expr|$v:value) => do mkAppM ``Expression.value #[← elabValue v]
-  | `(expr|$id:ident) => do
+-- Can be optimized by checking in the branches rather than at the end
+partial def elabExpression (stx : TSyntax `expr) : TermElabM Expr := match stx with
+  | `(expr|$v:value) => return mkApp2 (mkConst ``Expression.value) (← elabValue v) (← quoteAutoTactic stx)
+  | `(expr|$id:ident) =>
     match id.getId with
-      | .str fst snd => mkAppM ``Expression.field #[mkStrLit snd, mkStrLit fst.toString]
-      | _ => throwUnsupportedSyntax
-  | `(expr|+ $ae:expr) => do mkAppM ``Expression.un #[mkConst ``UnaryOp.add, ← elabExpression ae]
-  | `(expr|- $ae:expr) => do mkAppM ``Expression.un #[mkConst ``UnaryOp.sub, ← elabExpression ae]
-  | `(expr|$be₁:expr AND $be₂:expr) => do mkAppM ``Expression.bin #[← elabExpression be₁, mkApp (mkConst ``Operator.bop) (mkConst ``BoolBinOp.and), ← elabExpression be₂]
-  | `(expr|$be₁:expr OR $be₂:expr) => do mkAppM ``Expression.bin #[← elabExpression be₁, mkApp (mkConst ``Operator.bop) (mkConst ``BoolBinOp.or), ← elabExpression be₂]
-  | `(expr|$ae₁:expr $ps:propSymbol $ae₂:expr) => do mkAppM ``Expression.bin #[← elabExpression ae₁, ← elabPropSymbol ps, ← elabExpression ae₂]
+    | .str fst snd => return mkApp3 (mkConst ``Expression.field) (mkStrLit snd) (mkStrLit fst.toString) (← quoteAutoTactic stx)
+    | _ => throwUnsupportedSyntax
+  | `(expr|+ $ae:expr) => return mkApp3 (mkConst ``Expression.un) (mkConst ``UnaryOp.add) (← elabExpression ae) (← quoteAutoTactic stx)
+  | `(expr|- $ae:expr) => return mkApp3 (mkConst ``Expression.un) (mkConst ``UnaryOp.sub) (← elabExpression ae) (← quoteAutoTactic stx)
+  | `(expr|$be₁:expr AND $be₂:expr) => do
+    let be₁ ← elabExpression be₁
+    let be₂ ← elabExpression be₂
+    return mkApp4 (mkConst ``Expression.bin) be₁ (mkApp (mkConst ``Operator.bop) (mkConst ``BoolBinOp.and)) be₂ (← quoteAutoTactic stx)
+  | `(expr|$be₁:expr OR $be₂:expr) => do
+    let be₁ ← elabExpression be₁
+    let be₂ ← elabExpression be₂
+    return mkApp4 (mkConst ``Expression.bin) be₁ (mkApp (mkConst ``Operator.bop) (mkConst ``BoolBinOp.or)) be₂ (← quoteAutoTactic stx)
+  | `(expr|$ae₁:expr $ps:op $ae₂:expr) => do
+    let ae₁ ← elabExpression ae₁
+    let ae₂ ← elabExpression ae₂
+    let op ← elabOp ps
+    let stx ← quoteAutoTactic stx
+    return mkApp4 (mkConst ``Expression.bin) ae₁ op ae₂ stx
   | `(expr|($be:expr)) => elabExpression be
-  | `(expr|TRUE) => do mkAppM ``Expression.value #[← mkAppM ``Value.boolean #[mkConst ``true]]
-  | `(expr|FALSE) => do mkAppM ``Expression.value #[← mkAppM ``Value.boolean #[mkConst ``false]]
-  | `(expr|NOT $be:expr) => do mkAppM ``Expression.un #[mkConst ``UnaryOp.not , ← elabExpression be]
+  | `(expr|TRUE) => return mkApp2 (mkConst ``Expression.value) (mkApp2 (mkConst ``Value.boolean) (mkConst ``true) (← quoteAutoTactic stx)) (← quoteAutoTactic stx)
+  | `(expr|FALSE) => return mkApp2 (mkConst ``Expression.value) (mkApp2 (mkConst ``Value.boolean) (mkConst ``false) (← quoteAutoTactic stx)) (← quoteAutoTactic stx)
+  | `(expr|NOT $be:expr) => return mkApp3 (mkConst ``Expression.un) (mkConst ``UnaryOp.not) (← elabExpression be) (← quoteAutoTactic stx)
   | s => throwError s
 
-def elabSelectField : TSyntax `selectField → TermElabM Expr
-  | `(selectField|$field:ident) => do
+def elabSelectField (stx : TSyntax `selectField) : TermElabM Expr := match stx with
+  | `(selectField|$field:ident) =>
     match field.getId with
-      | .str fst snd => mkAppM ``SelectField.col #[mkStrLit snd, mkStrLit fst.toString]
-      | _ => throwUnsupportedSyntax
-  | `(selectField|$field:ident AS $as:ident) => do
+    | .str fst snd =>
+      return mkApp3 (mkConst ``SelectField.col) (mkStrLit snd) (mkStrLit fst.toString) (← quoteAutoTactic stx)
+    | _ => throwUnsupportedSyntax
+  | `(selectField|$field:ident AS $as:ident) =>
     match field.getId with
-      | .str fst snd => mkAppM ``SelectField.alias #[mkStrLit snd, mkStrLit fst.toString, mkStrLit as.getId.toString]
-      | _ => throwUnsupportedSyntax
+    | .str fst snd =>
+      let fieldName := snd
+      let tableName := fst.toString
+      let «alias» := as.getId.toString
+      return mkApp3 (mkConst ``SelectField.alias) (mkStrLit fieldName) (mkStrLit tableName) (mkStrLit «alias»)
+    | _ => throwUnsupportedSyntax
   | _ => throwUnsupportedSyntax
 
-def elabSelect : TSyntax `sqlSelect → TermElabM Expr
-  | `(sqlSelect|*)                          => do
-    mkAppM ``Select.all #[← mkConst ``Bool.false]
-  | `(sqlSelect|DISTINCT *)                 => do
-    mkAppM ``Select.all #[← mkConst ``Bool.true]
-  | `(sqlSelect|$cs:selectField,*)          => do
-    let cols ← mkListLit (mkConst ``SelectField) (← cs.getElems.toList.mapM (elabSelectField))
-    mkAppM ``Select.list #[← mkConst ``Bool.false, cols]
+def elabSelect (stx : TSyntax `sqlSelect) : TermElabM Expr := match stx with
+  | `(sqlSelect|*) => return mkApp2 (mkConst ``Select.all) (mkConst ``Bool.false) (← quoteAutoTactic stx)
+  | `(sqlSelect|DISTINCT *) => return mkApp2 (mkConst ``Select.all) (mkConst ``Bool.true) (← quoteAutoTactic stx)
+  | `(sqlSelect|$cs:selectField,*) => do
+    let exprs ← cs.getElems.toList.mapM elabSelectField
+    let cols ← mkListLit (mkConst ``SelectField) exprs
+    return mkApp3 (mkConst ``Select.list) (mkConst ``Bool.false) cols (← quoteAutoTactic stx)
   | `(sqlSelect|DISTINCT $cs:selectField,*) => do
-    let cols ← mkListLit (mkConst ``SelectField) (← cs.getElems.toList.mapM (elabSelectField))
-    mkAppM ``Select.list #[← mkConst ``Bool.true, cols]
+    let exprs ← cs.getElems.toList.mapM elabSelectField
+    let cols ← mkListLit (mkConst ``SelectField) exprs
+    return mkApp3 (mkConst ``Select.list) (mkConst ``Bool.true) cols (← quoteAutoTactic stx)
   | _ => throwUnsupportedSyntax
 
-def elabConst (name : Name) : TermElabM Expr :=
-  pure $ mkConst name
-
-def elabJoin : TSyntax `join → TermElabM Expr
-  | `(join|INNER) => elabConst `SQLJoin.inner
-  | `(join|LEFT)  => elabConst `SQLJoin.left
-  | `(join|RIGHT) => elabConst `SQLJoin.right
-  | `(join|OUTER) => elabConst `SQLJoin.outer
+def elabJoin (stx : TSyntax `join) : TermElabM Expr :=
+  match stx with
+  | `(join|INNER) => return mkApp (mkConst ``Join.inner) (← quoteAutoTactic stx)
+  | `(join|LEFT)  => return mkApp (mkConst ``Join.left) (← quoteAutoTactic stx)
+  | `(join|RIGHT) => return mkApp (mkConst ``Join.right) (← quoteAutoTactic stx)
+  | `(join|OUTER) => return mkApp (mkConst ``Join.outer) (← quoteAutoTactic stx)
   | _             => throwUnsupportedSyntax
 
-partial def elabFrom : TSyntax `sqlFrom → TermElabM Expr
-  | `(sqlFrom|$t:ident)               => do
-    mkAppM ``From.table #[mkStrLit t.getId.toString]
-  | `(sqlFrom|$f:sqlFrom AS $t:ident) => do
-    mkAppM ``From.alias #[← elabFrom f, mkStrLit t.getId.toString]
+partial def elabFrom (stx : TSyntax `sqlFrom) : TermElabM Expr := match stx with
+  | `(sqlFrom|$t:ident) => return mkApp2 (mkConst ``From.table) (mkStrLit t.getId.toString) (← quoteAutoTactic stx)
+  | `(sqlFrom|$f:sqlFrom AS $t:ident) =>
+    return mkApp3  (mkConst ``From.alias) (← elabFrom f) (mkStrLit t.getId.toString) (← quoteAutoTactic stx)
   | `(sqlFrom|$l:sqlFrom, $r:sqlFrom) => do
-    mkAppM ``From.implicitJoin #[← elabFrom l, ← elabFrom r]
+    let l ← elabFrom l
+    let r ← elabFrom r
+    return mkApp3 (mkConst ``From.implicitJoin) l r (← quoteAutoTactic stx)
   | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom ON $p:expr) => do
-    mkAppM ``From.join #[← elabJoin j, ← elabFrom l, ← elabFrom r, ← elabExpression p]
-  | `(sqlFrom|$l:sqlFrom $j:join JOIN $r:sqlFrom USING $ae:expr) => do
-    let eqStx ← `(expr|ae = $ae)
-    mkAppM ``From.join #[← elabJoin j, ← elabFrom l, ← elabFrom r, ← elabExpression eqStx]
-  | `(sqlFrom|($f:sqlFrom))           => do
-    elabFrom f
+    let l ← elabFrom l
+    let r ← elabFrom r
+    let j ← elabJoin j
+    let p ← elabExpression p
+    return mkApp5 (mkConst ``From.join) j l r p (← quoteAutoTactic stx)
+  | `(sqlFrom|($f:sqlFrom))           => elabFrom f
   | `(sqlFrom| (SELECT $sel:sqlSelect FROM $frm:sqlFrom $[WHERE $expr]?) AS $id:ident) => do
+    let sel ← elabSelect sel
+    let frm ← elabFrom frm
     let whr ← match expr with
-      | none     => mkAppM ``Expression.value #[← mkAppM ``Value.boolean #[mkConst ``true]]
-      | some expr => elabExpression expr
-    mkAppM ``From.nestedJoin #[← elabSelect sel, ← elabFrom frm, whr, mkStrLit id.getId.toString]
-  | _                                 => throwUnsupportedSyntax
+    | none => pure <| mkApp2 (mkConst ``Expression.value) (mkApp2 (mkConst ``Value.boolean) (mkConst ``true) (← quoteAutoTactic stx)) (← quoteAutoTactic stx)
+    | some expr => elabExpression expr
+    let al := id.getId.toString
+    return mkApp5 (mkConst ``From.nestedJoin) sel frm whr (mkStrLit al) (← quoteAutoTactic stx)
+  | _ => throwUnsupportedSyntax
 
-partial def elabQuery : TSyntax `sqlQuery → TermElabM Expr
+def elabQuery (stx : TSyntax `sqlQuery) : TermElabM Expr := match stx with
   | `(sqlQuery| SELECT $sel FROM $frm:sqlFrom $[WHERE $expr]?) => do
+    let frm ← elabFrom frm
     let whr ← match expr with
-      | none     => mkAppM ``Expression.value #[← mkAppM ``Value.boolean #[mkConst ``true]]
-      | some expr => elabExpression expr
-    mkAppM ``Query.mk #[← elabSelect sel, ← elabFrom frm, whr]
+    | none => pure <| mkApp2  (mkConst ``Expression.value) (mkApp2 (mkConst ``Value.boolean) (mkConst ``true) (← quoteAutoTactic stx)) (← quoteAutoTactic stx)
+    | some expr => elabExpression expr
+    let sel ← elabSelect sel
+    return mkApp4 (mkConst ``Query.mk) sel frm whr (← quoteAutoTactic stx)
   | _ => throwUnsupportedSyntax
 
-def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : CoreM RelationType :=
+def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : Except (String × Syntax) RelationType :=
   match checkQuery Γ t T with
-    | .ok _ => pure T
-    | .error e => throwError e
-
-def exprToDataType : Expr → TermElabM DataType
-  | .const ``DataType.bigInt _ => pure .bigInt
-  | .const ``DataType.integer _ => pure .integer
-  | .const ``DataType.date _ => pure .date
-  | _ => throwUnsupportedSyntax
-
-def exprToField : Expr → TermElabM (String × String × DataType)
-  | .app (.app _ (.lit (.strVal n))) (.app (.app _ (.lit (.strVal t))) l) => do
-    pure (n, t, (← exprToDataType l))
-  | _ => throwError "buuh"
-
-def exprToTable : Expr → TermElabM (String × RelationType)
-  | .app (.app _ (.lit (.strVal tableName))) L => do
-    if let .some table := L.listLit? then
-      pure (tableName, ← table.snd.mapM exprToField)
-    else
-      throwError "Schema is not wellformed."
-  | _ => throwUnsupportedSyntax
-
-def exprToSchema : Expr → TermElabM Schema := fun x => do
-  if let .some styp := x.listLit? then
-    styp.snd.mapM exprToTable
-  else
-    throwUnsupportedSyntax
+  | .ok rt => .ok rt.fst
+  | .error e => .error e
 
 elab_rules : term
-  | `(pgquery| $id |- $query ∶ $relation) => do
+  | `(pgquery| pquery( $id |- $query ∶ $relation )) => do
     let env ← getEnv
     if let .some s := env.find? id.getId then
-      let Γ ← exprToSchema s.value!
       let query ← elabQuery query
       let checked ← elabAppArgs (mkConst ``checkQuery!) #[] #[Arg.expr s.value!, Arg.expr query, Arg.stx relation] .none (explicit := false) (ellipsis := false)
-      match ← whnf checked with
-      | Expr.lam _ _ b _ => match b with
-        | .app (.app (.app (.app (.const ``pure ..) _) _) _) (.app (.app (.app (.const ``List.cons _) (.mvar (.mk _))) (.app (.app _ (.lit (.strVal _fieldName))) (.app (.app (.app _ (.mvar (.mk _))) (.lit (.strVal _table))) _))) _) => pure query
-        | .app _ (.lam _ _ (.app (.app (.lam _ _ (.app (.app _ (.app _ (.app _ error))) _) _) _) _) _) => throwError error
-        | _ => throwError "Query checking failed unexpectedly."
-      | e =>
-          throwError "Query checking failed {e}"
+      let qAST ← unsafe evalExpr (Except (String × Syntax) RelationType) (.app (.app (.const `Except [0, 0]) (.app (.app (.const `Prod [0, 0]) (.const `String [])) (.const `Lean.Syntax []))) (.const ``RelationType [])) checked
+      let stx ← getRef
+      match qAST with
+      | .ok _ => pure query
+      | .error (e, estx) =>
+        match stx.find? (. == estx) with
+        | .some estx => throwErrorAt estx e
+        | .none => throwError "Error location Syntax {estx} in AST not in currently elaborated Syntax {stx}."
     else
       throwUnsupportedSyntax
 
-def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
+def schema : Schema := [("employee", [("id", "employee", DataType.bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
+
+-- Check for abstraction e.G. functions that create queries (limitations of library)
+-- Better syntax cat names
+-- Rather shadow than a' a'' a'''
 
 -- Should select all ✓
-#check schema |- SELECT * FROM employee ∶ [("id", "employee", .bigInt)]
+#check pquery( schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt)] )
+-- Should fail on typo ✓
+#check pquery( schema |- SELECT * FROM employee ∶ [("idd", "employee", DataType.bigInt)] )
 -- Should not select too many ✓
---#check schema |- SELECT * FROM employee ∶ [("id", "employee", .bigInt), ("id", "employee", .bigInt)]
+#check pquery( schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt), ("id", "employee", .bigInt)] )
 -- Should not select too few ✓
---#check schema |- SELECT * FROM customer ∶ [("id", "customer", .bigInt)]
+#check pquery( schema |- SELECT * FROM customer ∶ [("id", "customer", DataType.bigInt)] )
 -- Should select all joined ✓
-#check schema |- SELECT * FROM employee, customer ∶ [("id", "employee", .bigInt), ("id", "customer", .bigInt), ("date", "customer", .date)]
+#check pquery( schema |- SELECT * FROM employee, customer ∶ [("id", "employee", DataType.bigInt), ("id", "customer", DataType.bigInt), ("date", "customer", DataType.date)] )
 -- Should select some ✓
-#check schema |- SELECT customer.date FROM employee, customer ∶ [("date", "customer", .date)]
--- Should fail on ambiguity × (TODO: handle postfixing)
---#check schema |- SELECT id FROM employee, customer ∶ [("date", "customer", .date)]
+#check pquery( schema |- SELECT customer.date FROM employee, customer ∶ [("date", "customer", DataType.date)] )
+-- Should fail on ambiguity × (Non prefixed field inference not yet supported)
+#check pquery( schema |- SELECT id FROM employee, customer ∶ [("date", "customer", DataType.date)] )
 -- Should select only corresponding id ✓
-#check schema |- SELECT customer.id FROM employee, customer ∶ [("id", "customer", .bigInt)]
-#check schema |- SELECT employee.id FROM employee, customer ∶ [("id", "employee", .bigInt)]
--- Should fail on invalid select field ✓
---#check schema |- SELECT employee.id FROM employee AS b, customer ∶ [("id", "b", .bigInt)]
+#check pquery( schema |- SELECT customer.id FROM employee, customer ∶ [("id", "customer", DataType.bigInt)] )
+#check pquery( schema |- SELECT employee.id FROM employee, customer ∶ [("id", "employee", DataType.bigInt)] )
+-- Should fail on outdated select field ✓
+#check pquery( schema |- SELECT employee.id FROM employee AS b, customer ∶ [("id", "b", DataType.bigInt)] )
 -- Should succeed with table alias ✓
-#check schema |- SELECT b.id FROM employee AS b, customer ∶ [("id", "b", .bigInt)]
--- Should have empty table ✓
-#check schema |- SELECT employee.id AS fakeID FROM employee ∶ [("fakeID", "employee", .bigInt)]
--- Should only allow nesting with alias ✓
-#check schema |- SELECT a.id FROM (SELECT * FROM customer) AS a ∶ [("id", "a", .bigInt)]
-#check schema |- SELECT a.id FROM (SELECT * FROM customer) ∶ [("id", "a", .bigInt)]
--- Should succeed on correct expr ✓ × (TODO: check date)
-#check schema |- SELECT customer.id FROM customer WHERE +(customer.id / 2) = (-1 + 0.0) AND TRUE ∶ [("id", "customer", .bigInt)]
---#check schema |- SELECT customer.id FROM customer WHERE (customer.date + 8) > customer.date ∶ [("id", "customer", .bigInt)]
+#check pquery( schema |- SELECT b.id FROM employee AS b, customer ∶ [("id", "b", DataType.bigInt)] )
+-- Should succeed with field alias ✓
+#check pquery( schema |- SELECT employee.id AS fakeID FROM employee ∶ [("fakeID", "employee", DataType.bigInt)] )
+-- Should only allow nesting with alias ×
+#check pquery( schema |- SELECT a.id FROM (SELECT * FROM customer) AS a ∶ [("id", "a", DataType.bigInt)] )
+#check pquery( schema |- SELECT a.id FROM (SELECT * FROM customer) ∶ [("id", "a", .bigInt)] )
+-- Should succeed on correct expr ✓
+#check pquery( schema |- SELECT customer.id FROM customer WHERE +(customer.id / 2) = (-1 + 0.0) AND TRUE ∶ [("id", "customer", DataType.bigInt)] )
+#check pquery( schema |- SELECT customer.id FROM customer WHERE (customer.date + 8) > customer.date ∶ [("id", "customer", DataType.bigInt)] )
+-- Should fail on wrong value
+#check pquery( schema |- SELECT * FROM employee WHERE 9999999999 > 0 ∶ [("id", "employee", DataType.bigInt)] )
 -- Should fail on wrong expr
---#check schema |- SELECT customer.id FROM customer WHERE 9 AND TRUE ∶ [("id", "customer", .bigInt)]
---#check schema |- SELECT customer.id FROM customer WHERE TRUE + 8 ∶ [("id", "customer", .bigInt)]
---#check schema |- SELECT customer.id FROM customer WHERE (8 + customer.date) > customer.date ∶ [("id", "customer", .bigInt)]
+#check pquery( schema |- SELECT customer.id FROM customer WHERE 9 AND TRUE ∶ [("id", "customer", DataType.bigInt)] )
+#check pquery( schema |- SELECT customer.id FROM customer WHERE TRUE + 8 ∶ [("id", "customer", DataType.bigInt)] )
+#check pquery( schema |- SELECT customer.id FROM customer WHERE (8 + customer.date) > customer.date ∶ [("id", "customer", DataType.bigInt)] )
 -- Should succeed on double dot alias ✓
-#check schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a ∶ [("a", "a.a", .bigInt)]
+#check pquery( schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a ∶ [("a", "a.a", DataType.bigInt)] )
+-- Should nest deeply ✓
+#check pquery( schema |- SELECT a.id FROM (SELECT b.id FROM (SELECT customer.id FROM customer) AS b) AS a ∶ [("id", "a", DataType.bigInt)] )
+
+def schema2 : Schema :=
+  [
+    ("Students", [
+      ("student_id", "Students", DataType.integer),
+      ("student_name", "Students", DataType.varchar),
+      ("gender", "Students", DataType.integer),
+      ("age", "Students", DataType.integer),
+      ("major", "Students", DataType.text)
+    ]),
+    ("Courses", [
+      ("course_id", "Courses", DataType.integer),
+      ("course_name", "Courses", DataType.text),
+      ("course_credits", "Courses", DataType.integer)
+    ]),
+    ("Enrollments", [
+      ("enrollment_id", "Enrollments", DataType.integer),
+      ("student_id", "Enrollments", DataType.text),
+      ("semester", "Enrollments", DataType.varchar),
+      ("grade", "Enrollments", DataType.char),
+      ("student_id", "Enrollments", DataType.integer),
+      ("course_id", "Enrollments", DataType.integer),
+    ]),
+  ]
+
+#check pquery( schema2 |-
+SELECT
+    Students.student_id,
+    Students.student_name,
+    Students.gender,
+    Students.age,
+    Students.major,
+    Courses.course_name,
+    Courses.course_credits,
+    Enrollments.semester,
+    Enrollments.grade
+FROM
+    Students
+INNER JOIN
+    Enrollments ON Students.student_id = Enrollments.student_id
+INNER JOIN
+    Courses ON Enrollments.course_id = Courses.course_id
+∶ [("student_id", "Students", DataType.integer),
+    ("student_name", "Students", DataType.varchar),
+    ("gender", "Students", DataType.integer),
+    ("age", "Students", DataType.integer),
+    ("major", "Students", DataType.text),
+    ("course_name", "Courses", DataType.text),
+    ("course_credits", "Courses", DataType.integer),
+    ("semester", "Enrollments", DataType.varchar),
+    ("grade", "Enrollments", DataType.char)
+    ]
+)

@@ -200,7 +200,7 @@
   [$Gamma tack$ bin lhs (aop op) rhs : T],
   [$Gamma tack$ lhs : T₁],
   [$Gamma tack$ rhs : T₂],
-  [NumConv T₁ T₂ : T],
+  [NumConv lhs rhs : T],
 )
 
 #let tj-concat = rule(

@@ -128,7 +128,7 @@ def prepare (connection : @& Connection) (statementName: String) (query : String
   PGconn *conn = of_lean<Connection>(connection);
   const char *stmtName = lean_string_cstr(statementName);
   const char *qry = lean_string_cstr(query);
-  const Oid *paramTypes = lean_sarray_cptr(parameterTypes);
+  const uint8_t *paramTypes = lean_sarray_cptr((lean_object*)parameterTypes);
   PGresult *res;
   -- TODO: Retire paramTypes if it infers using NULL?
   res = PQprepare(conn, stmtName, qry, nParams, NULL);
@@ -140,15 +140,16 @@ def execPrepared (connection : @& Connection) (statementName: String) (nParams :
   lean_object** objects = lean_array_cptr(parameterValues);
   PGconn *conn = of_lean<Connection>(connection);
   PGresult *res;
-  const int *paramLengths = lean_sarray_cptr(parameterLengths);
-  const int *paramFormats = lean_sarray_cptr(parameterLengths);
-  char **values = malloc(sizeof(void*)*nParams);
+  const uint8_t *paramLengths = lean_sarray_cptr((lean_object*)parameterLengths);
+  const uint8_t *paramFormats = lean_sarray_cptr((lean_object*)parameterLengths);
+  char **values = (char**)malloc(sizeof(void*)*nParams);
   for (int i = 0; i < nParams; i++) {
-    char* current = lean_string_cstr(objects[i]);
+    char* current = (char*)lean_string_cstr(objects[i]);
     values[i] = current;
   }
+  const char *const *paramValues = (const char *const*)values;
   -- TODO: Retire paramTypes if it infers using NULL?
-  res = PQexecPrepared(conn, stmtName, nParams, values, NULL, NULL, resultFormat);
+  res = PQexecPrepared(conn, stmtName, nParams, paramValues, NULL, NULL, resultFormat);
   free(values);
   return lean_io_result_mk_ok(to_lean<Result>(res));
 
@@ -158,17 +159,16 @@ def execParams (connection : @& Connection) (query : String) (nParams : USize) (
   lean_object** objects = lean_array_cptr(parameterValues);
   PGconn *conn = of_lean<Connection>(connection);
   PGresult *res;
-  const int *paramLengths = lean_sarray_cptr(parameterLengths);
-  const int *paramFormats = lean_sarray_cptr(parameterLengths);
-  printf("number; %d\n", nParams);
-  char **values = malloc(sizeof(void*)*nParams);
+  const uint8_t *paramLengths = lean_sarray_cptr(parameterLengths);
+  const uint8_t *paramFormats = lean_sarray_cptr(parameterLengths);
+  char **values = (char**)malloc(sizeof(void*)*nParams);
   for (int i = 0; i < nParams; i++) {
-    char* current = lean_string_cstr(objects[i]);
+    char* current = (char*)lean_string_cstr(objects[i]);
     values[i] = current;
-    printf("%s\n", current);
   }
+  const char *const *paramValues = (const char *const*)values;
   -- TODO: Retire paramTypes if it infers using NULL?
-  res = PQexecParams(conn, qry, nParams, NULL, values, NULL, NULL, resultFormat);
+  res = PQexecParams(conn, qry, nParams, NULL, paramValues, NULL, NULL, resultFormat);
   free(values);
   return lean_io_result_mk_ok(to_lean<Result>(res));
 

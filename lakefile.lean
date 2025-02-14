@@ -1,7 +1,7 @@
 import Lake
 open Lake DSL
 
-require alloy from git "https://github.com/tydeu/lean4-alloy" @ "master"
+require alloy from git "https://github.com/tydeu/lean4-alloy"@"a712058ff5ca47f670f6d25ea2b2a7385d9523ae"
 
 package Postgres where
   buildType := .debug
@@ -17,5 +17,5 @@ lean_lib Postgres where
       #[Module.oExportFacet, `alloy.c.o.export]
     else
       #[Module.oNoExportFacet, `alloy.c.o.noexport]
-  moreLeancArgs := #["-fPIC", "-I/opt/homebrew/opt/libpq/include"]
-  moreLinkArgs := #["-lpq", "-L/opt/homebrew/opt/libpq/lib"]
+  moreLeancArgs := #["-fPIC", "-I/usr/include/libpq"]
+  moreLinkArgs := #["-lpq", "-L/usr/lib"]

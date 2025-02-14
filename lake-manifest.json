@@ -7,7 +7,7 @@
    "rev": "a712058ff5ca47f670f6d25ea2b2a7385d9523ae",
    "name": "alloy",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "master",
+   "inputRev": "a712058ff5ca47f670f6d25ea2b2a7385d9523ae",
    "inherited": false,
    "configFile": "lakefile.lean"}],
  "name": "Postgres",

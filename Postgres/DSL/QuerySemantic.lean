@@ -583,8 +583,26 @@ def checkFrom (Γ : Schema) (T : RelationType) (t : From) : Except (String × Sy
     else
       .error (s!"Nested From type {T} must match Select {(Ts.map fun (n, _, ty) => (n, a, ty))} type.", stx)
 
-def checkQuery (Γ : Schema) : (t : Query) → (T : RelationType) → Except (String × Syntax) (Σ' T, (WellFormedQuery Γ t T))
-  | ⟨sel, frm, whr, stx⟩, T => do
+def inferQuerType (sel : Select) (frm : From) (Γ : Schema) :=
+  match sel with
+  | .all _ _ => do
+    getFromTable Γ frm
+  | .list _ ss _ => do
+    let fromTable ← getFromTable Γ frm
+    return ss.filterMap (fun s => SelectField.getTuple fromTable s)
+
+def checkQuery (Γ : Schema) : (t : Query) → (T : Option RelationType) → Except (String × Syntax) (Σ' T, (WellFormedQuery Γ t T))
+  | ⟨sel, frm, whr, stx⟩, .none => do
+    let fromTable ← getFromTable Γ frm
+    let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
+    let T ← inferQuerType sel frm Γ
+    let ⟨Ts, wsel⟩ ← checkSel Tf T sel
+    let wwhr ← checkExpression Tf whr
+    if heq : Ts = T ∧ wwhr.fst = .boolean then
+      return ⟨Ts, (.mk (heq.left ▸ wsel) wfrm (heq.right ▸ wwhr.snd))⟩
+    else
+      .error (s!"Query type {T} must match Select {Ts} type.", stx)
+  | ⟨sel, frm, whr, stx⟩, .some T => do
     let fromTable ← getFromTable Γ frm
     let ⟨Tf, wfrm⟩ ← checkFrom Γ fromTable frm
     let ⟨Ts, wsel⟩ ← checkSel Tf T sel

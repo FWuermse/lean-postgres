@@ -68,7 +68,7 @@ syntax "(" sqlFrom ")"                                        : sqlFrom
 
 syntax "SELECT " sqlSelect " FROM " sqlFrom (" WHERE " expr)? : sqlQuery
 
-syntax (name := pgquery) "pquery(" ident " |- " sqlQuery " ∶ " term ")" : term
+syntax (name := pgquery) "pquery(" ident " |- " sqlQuery (" ∶ " term)? ")" : term
 
 partial def elabValue (stx : TSyntax `value) : TermElabM Expr := do
   let expr := match stx with
@@ -216,6 +216,11 @@ def checkQuery! (Γ : Schema) (t : Query) (T : RelationType) : Except (String ×
   | .ok rt => .ok rt.fst
   | .error e => .error e
 
+def checkQueryInf! (Γ : Schema) (t : Query) : Except (String × Syntax) RelationType :=
+  match checkQuery Γ t .none with
+  | .ok rt => .ok rt.fst
+  | .error e => .error e
+
 namespace QuerySyntax
 
 elab_rules : term
@@ -224,6 +229,21 @@ elab_rules : term
     if let .some s := env.find? id.getId then
       let query ← elabQuery query
       let checked ← elabAppArgs (mkConst ``checkQuery!) #[] #[Arg.expr s.value!, Arg.expr query, Arg.stx relation] .none (explicit := false) (ellipsis := false)
+      let qAST ← unsafe evalExpr (Except (String × Syntax) RelationType) (.app (.app (.const `Except [0, 0]) (.app (.app (.const `Prod [0, 0]) (.const `String [])) (.const `Lean.Syntax []))) (.const ``QueryAST.RelationType [])) checked
+      let stx ← getRef
+      match qAST with
+      | .ok _ => pure query
+      | .error (e, estx) =>
+        match stx.find? (. == estx) with
+        | .some estx => throwErrorAt estx e
+        | .none => throwError "Error location Syntax {estx} in AST not in currently elaborated Syntax {stx}."
+    else
+      throwUnsupportedSyntax
+  | `(pgquery| pquery( $id |- $query )) => do
+    let env ← getEnv
+    if let .some s := env.find? id.getId then
+      let query ← elabQuery query
+      let checked ← elabAppArgs (mkConst ``checkQueryInf!) #[] #[Arg.expr s.value!, Arg.expr query] .none (explicit := false) (ellipsis := false)
       let qAST ← unsafe evalExpr (Except (String × Syntax) RelationType) (.app (.app (.const `Except [0, 0]) (.app (.app (.const `Prod [0, 0]) (.const `String [])) (.const `Lean.Syntax []))) (.const ``QueryAST.RelationType [])) checked
       let stx ← getRef
       match qAST with

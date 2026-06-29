@@ -13,13 +13,42 @@ def stringTables (table : Option (List (List String))) : String :=
   | none => "Error"
   | some t => "\n".intercalate (t.map (", ".intercalate .))
 
-def schema : Schema := [("employee", [("id", "employee", .bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
+def schema : Schema := [
+  ("employee", [
+    ("id", "employee", .bigInt)]),
+  ("customer", [
+    ("id", "customer", .bigInt),
+    ("date", "customer", .date)])]
 
 def queriesOnSchema : SQL Unit := do
-  let query := pquery( schema |- SELECT * FROM employee ∶ [("id", "employee", DataType.bigInt)] )
+  let query := pquery( schema |- SELECT * FROM employee )
   let res ← sendQuery query
   IO.println <| stringTables res
   IO.println query
+
+def testQueriesInferred : SQL Unit := do
+  let schema : Schema := [("employee", [("id", "employee", DataType.bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
+  -- Should select all ✓
+  #check pquery(schema |- SELECT employee.id FROM employee )
+  #check pquery(schema |- SELECT customer.date FROM employee, customer  )
+  -- Should fail on ambiguity ✗ (Non prefixed field inference not yet supported)
+  #check pquery(schema |- SELECT id FROM employee, customer )
+  #check pquery(schema |- SELECT customer.id FROM employee, customer )
+  #check pquery(schema |- SELECT employee.id FROM employee, customer )
+  -- Should fail on outdated select field ✗
+  #check pquery(schema |- SELECT employee_id FROM employee AS b, customer )
+  #check pquery(schema |- SELECT b.id FROM employee AS b, customer )
+  #check pquery(schema |- SELECT employee.id AS fakeID FROM employee )
+  #check pquery(schema |- SELECT a.id FROM (SELECT * FROM customer) AS a )
+  #check pquery(schema |- SELECT customer.id FROM customer WHERE +(customer.id / 2) = (-1 + 0.0) AND TRUE )
+  #check pquery(schema |- SELECT customer.id FROM customer WHERE (customer.date + 8) > customer.date )
+  -- Should fail on wrong value ✗
+  #check pquery(schema |- SELECT * FROM employee WHERE 9999999999 > 0 )
+  #check pquery(schema |- SELECT customer.id FROM customer WHERE 9 AND TRUE )
+  #check pquery(schema |- SELECT customer.id FROM customer WHERE TRUE + 8 )
+  #check pquery(schema |- SELECT customer.id FROM customer WHERE (8 + customer.date) > customer.date )
+  -- Should succeed on double dot alias ✓
+  #check pquery(schema |- SELECT a.a.a FROM (SELECT customer.id AS a FROM customer) AS a.a )
 
 def testQueries : SQL Unit := do
   let schema : Schema := [("employee", [("id", "employee", DataType.bigInt)]), ("customer", [("id", "customer", .bigInt), ("date", "customer", .date)])]
@@ -38,6 +67,7 @@ def testQueries : SQL Unit := do
 
 def main : IO Unit := do
   let conn ← login "0.0.0.0" "5432" "postgres" "postgres" "password"
-  queriesOnSchema.run {conn}
-  testQueries.run {conn}
+  queriesOnSchema.run ⟨conn⟩
+  testQueriesInferred.run ⟨conn⟩
+  testQueries.run ⟨conn⟩
   pure ()

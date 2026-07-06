@@ -335,22 +335,16 @@ instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSele
             (by
               have h_eq : n = name ∧ t = table := (by
                 have h := List.find?_some hfind
-                have ht_eq : (n, t) = (name, table) := by
-                  simp [eq_true_of_decide] at h
-                  simp
-                  exact h
-                cases ht_eq
-                apply And.intro <;> rfl)
+                simp at h
+                exact h)
               apply List.mem_of_find?_eq_some
-              . exact h_eq.left ▸ h_eq.right ▸ hfind)
+              exact h_eq.left ▸ h_eq.right ▸ hfind)
           apply WellFormedSelectField.col hmem)
         | .none => isFalse (by
           simp_all [not_exists, List.find?_eq_none]
           intro dt
-          have h_neq : (name, table, dt) ∉ Γ  := (by
-            intro hmem
-            have hfalse := hfind (name, table, dt) hmem
-            apply hfalse <;> rfl)
+          have h_neq : (name, table, dt) ∉ Γ := fun hmem =>
+            hfind name table dt hmem rfl rfl
           intro wfsf
           cases wfsf
           apply h_neq
@@ -365,22 +359,16 @@ instance (Γ : RelationType) (s : SelectField) : Decidable (∃T, WellFormedSele
             (by
               have h_eq : n = name ∧ t = table := (by
                 have h := List.find?_some hfind
-                have ht_eq : (n, t) = (name, table) := by
-                  simp [eq_true_of_decide] at h
-                  simp
-                  exact h
-                cases ht_eq
-                apply And.intro <;> rfl)
+                simp at h
+                exact h)
               apply List.mem_of_find?_eq_some
-              . exact h_eq.left ▸ h_eq.right ▸ hfind)
+              exact h_eq.left ▸ h_eq.right ▸ hfind)
           apply WellFormedSelectField.alias hmem)
         | .none => isFalse (by
           simp_all [not_exists, List.find?_eq_none]
           intro dt
-          have h_neq : (name, table, dt) ∉ Γ  := (by
-            intro hmem
-            have hfalse := hfind (name, table, dt) hmem
-            apply hfalse <;> rfl)
+          have h_neq : (name, table, dt) ∉ Γ := fun hmem =>
+            hfind name table dt hmem rfl rfl
           intro wfsf
           cases wfsf
           apply h_neq

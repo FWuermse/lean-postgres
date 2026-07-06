@@ -6,26 +6,24 @@
 
 import Postgres
 
-open LibPQ
-open Query
-open DDL
+open LibPQ Query QueryAST QuerySyntax
 
 def stringTables (table : Option (List (List String))) : String :=
   match table with
   | none => "Error"
   | some t => "\n".intercalate (t.map (", ".intercalate .))
 
+def schema : Schema := [
+  ("employee", [
+    ("id", "employee", .bigInt)]),
+  ("customer", [
+    ("id", "customer", .bigInt),
+    ("date", "customer", .date)])]
+
 def main : IO Unit := do
-  let conn₁ ← login "localhost" "5432" "postgres" "postgres" "password"
-  let conn₂ ← connect "host=localhost port=5432 dbname=postgres user=postgres password=password connect_timeout=10"
-  let status := conn₁.status
+  let conn ← login "localhost" "5432" "postgres" "postgres" "password"
+  let status := conn.status
   IO.println <| status.toString
-  IO.println <| ← listTables ⟨conn₁⟩
-  -- conn₂ closed due to ref count
-  IO.println <| ← listTables ⟨conn₂⟩
-  let untypedQuery := query |
-    SELECT id, name, age
-    FROM mytable
-  -- conn₁ closed due to ref count
-  let res ← sendUntypedQuery untypedQuery |>.run ⟨conn₁⟩
-  IO.println $ stringTables res
+  let q := pquery( schema |- SELECT * FROM employee )
+  let res ← sendQuery q |>.run ⟨conn⟩
+  IO.println <| stringTables res

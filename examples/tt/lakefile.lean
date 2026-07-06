@@ -1,9 +1,8 @@
 import Lake
-open System Lake DSL
+open Lake DSL
 
 package DDL where
 
 @[default_target]
-lean_exe DDL where
-  moreLinkArgs := #["-lpq", "-L/opt/homebrew/opt/libpq/lib"]
-  root := `Main
+lean_lib DDL where
+  roots := #[`Main]
